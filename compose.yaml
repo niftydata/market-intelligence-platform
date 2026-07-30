@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: market_intelligence
+      POSTGRES_USER: market_intelligence
+      POSTGRES_PASSWORD: market_intelligence
+    ports:
+      - "5432:5432"
+    volumes:
+      - market_intelligence_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U market_intelligence -d market_intelligence",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  market_intelligence_postgres:

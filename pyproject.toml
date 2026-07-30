@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "market-intelligence-platform"
+version = "0.1.0"
+description = "Production-inspired market intelligence data platform."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "pandas>=2.2,<3.0",
+    "psycopg[binary]>=3.2,<4.0",
+    "python-dotenv>=1.0,<2.0",
+    "SQLAlchemy>=2.0,<3.0",
+    "yfinance>=0.2.65,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9.0",
+    "ruff>=0.12,<1.0",
+]
+
+[project.scripts]
+market-intelligence = "market_intelligence.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
