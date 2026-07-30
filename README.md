@@ -80,6 +80,12 @@ Refresh the curated analytical dataset:
 market-intelligence transform-curated
 ```
 
+Start the dashboard locally:
+
+```powershell
+streamlit run app/streamlit_app.py
+```
+
 For a reproducible historical run:
 
 ```powershell
@@ -168,3 +174,20 @@ Remove-Item Env:INTEGRATION_DATABASE_URL
 It independently recalculates the latest rolling average, return, and
 volatility from raw closing values and compares them with the persisted curated
 metrics.
+
+## Render dashboard deployment
+
+`render.yaml` defines a Singapore-region Streamlit web service with a health
+check and the custom domain
+`market-intelligence.niftydata.com.au`.
+
+The Render web service requires one secret environment variable:
+
+- `DATABASE_URL`: use the Render PostgreSQL **internal** database URL when the
+  web service and database are both in Singapore.
+
+The dashboard is read-only and queries only curated and operational metadata.
+It does not perform ingestion or transformation work in a web request.
+
+The complete Render and DNS handoff is in
+[`docs/render-deployment.md`](docs/render-deployment.md).

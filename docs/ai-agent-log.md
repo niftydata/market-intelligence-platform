@@ -46,3 +46,32 @@ The agent did not silently clean incomplete latest-period records:
 
 Both were retained in `control.rejected_record`, their pipeline runs completed
 with warnings, and only complete records entered raw tables.
+
+## Dashboard iteration for the intended audience
+
+The case study requires a single view for financially literate, non-technical
+management. The agent's initial design space included additional navigation,
+filters, and operational detail. These were deliberately excluded because they
+would compete with the management question and increase demo risk.
+
+Accepted contribution:
+
+- a four-indicator executive summary;
+- a visible, plain-language RAG interpretation;
+- one combined market, rolling-average, and cash-rate chart;
+- a separate volatility watch panel with the actual thresholds;
+- a deterministic narrative that distinguishes correlation or divergence from
+  causation;
+- concise freshness and source disclosures.
+
+Human guardrails:
+
+- retain the required 90-day focus;
+- use index price because index volume is not consistently reliable;
+- keep transformations outside Streamlit;
+- show no trading recommendation;
+- expose the RAG methodology rather than presenting an unexplained colour.
+
+Verification: the dashboard is executed against PostgreSQL with Streamlit's
+testing framework, and the deployed process exposes a successful health
+endpoint before release.

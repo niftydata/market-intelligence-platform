@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: market-intelligence-dashboard
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install .
+    startCommand: >-
+      streamlit run app/streamlit_app.py
+      --server.address 0.0.0.0
+      --server.port $PORT
+      --server.headless true
+    healthCheckPath: /_stcore/health
+    autoDeployTrigger: commit
+    domains:
+      - market-intelligence.niftydata.com.au
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: DATABASE_URL
+        sync: false
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"

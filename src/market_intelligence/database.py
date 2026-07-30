@@ -12,7 +12,26 @@ TRANSFORMS_DIRECTORY = Path(__file__).resolve().parents[2] / "sql" / "transforms
 
 
 def create_database_engine(database_url: str) -> Engine:
-    return create_engine(database_url, pool_pre_ping=True)
+    normalized_url = database_url
+    if database_url.startswith("postgresql://"):
+        normalized_url = database_url.replace(
+            "postgresql://",
+            "postgresql+psycopg://",
+            1,
+        )
+    elif database_url.startswith("postgres://"):
+        normalized_url = database_url.replace(
+            "postgres://",
+            "postgresql+psycopg://",
+            1,
+        )
+    return create_engine(
+        normalized_url,
+        pool_pre_ping=True,
+        pool_size=3,
+        max_overflow=2,
+        pool_recycle=300,
+    )
 
 
 def apply_migrations(engine: Engine) -> None:
