@@ -8,11 +8,14 @@ from market_intelligence.config import Settings
 from market_intelligence.database import (
     complete_pipeline_run,
     create_database_engine,
+    curated_quality_snapshot,
     fail_pipeline_run,
     insert_quality_result,
     insert_rejected_records,
     latest_market_date,
     latest_rba_date,
+    market_date_bounds,
+    refresh_market_intelligence_daily,
     start_pipeline_run,
     upsert_market_records,
     upsert_rba_records,
@@ -29,6 +32,7 @@ from market_intelligence.ingestion.yahoo import (
 LOGGER = logging.getLogger(__name__)
 PIPELINE_NAME = "yahoo_market_index_daily"
 RBA_PIPELINE_NAME = "rba_interbank_cash_rate_daily"
+CURATED_PIPELINE_NAME = "curated_market_intelligence_daily"
 
 
 def run_yahoo_pipeline(settings: Settings, *, as_of_date: date) -> int:
@@ -243,6 +247,109 @@ def run_rba_pipeline(settings: Settings, *, as_of_date: date) -> int:
                 "pipeline_run_id": pipeline_run_id,
                 "source": "reserve_bank_of_australia",
             },
+        )
+        raise
+    finally:
+        engine.dispose()
+
+
+def run_curated_pipeline(settings: Settings) -> int:
+    engine = create_database_engine(settings.database_url)
+    first_market_date, latest_market_date, raw_record_count = market_date_bounds(engine)
+    pipeline_run_id = start_pipeline_run(
+        engine,
+        pipeline_name=CURATED_PIPELINE_NAME,
+        extraction_start_date=first_market_date,
+        extraction_end_date=latest_market_date,
+        metadata=json.dumps(
+            {
+                "grain": "one row per ASX200 trading date",
+                "macro_alignment": "latest RBA observation on or before trading date",
+                "history_window": "five years",
+                "metric_contract": "docs/metric_definitions.md",
+            }
+        ),
+    )
+    LOGGER.info(
+        "Started curated market-intelligence transformation",
+        extra={"pipeline_run_id": pipeline_run_id, "source": "curated"},
+    )
+
+    try:
+        refreshed_count = refresh_market_intelligence_daily(
+            engine,
+            pipeline_run_id=pipeline_run_id,
+        )
+        snapshot = curated_quality_snapshot(engine)
+        hard_failures: list[str] = []
+        if snapshot["curated_count"] == 0:
+            hard_failures.append("curated dataset is empty")
+        if snapshot["latest_curated_date"] != snapshot["latest_raw_market_date"]:
+            hard_failures.append("curated latest date does not match raw market data")
+        if snapshot["future_macro_count"] != 0:
+            hard_failures.append("curated rows contain future macro observations")
+        if hard_failures:
+            raise RuntimeError("; ".join(hard_failures))
+
+        macro_missing = int(snapshot["missing_macro_count"])
+        insert_quality_result(
+            engine,
+            pipeline_run_id=pipeline_run_id,
+            check_name="curated_macro_alignment",
+            status="passed" if macro_missing == 0 else "warning",
+            records_checked=int(snapshot["curated_count"]),
+            records_failed=macro_missing,
+            details=json.dumps(
+                {
+                    "alignment_rule": (
+                        "latest RBA observation on or before market trading date"
+                    ),
+                    "future_macro_observations": snapshot["future_macro_count"],
+                }
+            ),
+        )
+
+        incomplete_metrics = int(snapshot["recent_incomplete_metric_count"])
+        insert_quality_result(
+            engine,
+            pipeline_run_id=pipeline_run_id,
+            check_name="curated_recent_metric_completeness",
+            status="passed" if incomplete_metrics == 0 else "failed",
+            records_checked=int(snapshot["curated_count"]),
+            records_failed=incomplete_metrics,
+            details=json.dumps({"window": "latest 90 calendar days"}),
+        )
+        if incomplete_metrics:
+            raise RuntimeError(
+                f"{incomplete_metrics} recent curated rows have incomplete metrics"
+            )
+
+        complete_pipeline_run(
+            engine,
+            pipeline_run_id=pipeline_run_id,
+            records_received=raw_record_count,
+            records_accepted=refreshed_count,
+            records_rejected=0,
+        )
+        LOGGER.info(
+            "Completed curated market-intelligence transformation",
+            extra={
+                "pipeline_run_id": pipeline_run_id,
+                "source": "curated",
+                "records": refreshed_count,
+            },
+        )
+        return pipeline_run_id
+    except Exception as error:
+        fail_pipeline_run(
+            engine,
+            pipeline_run_id=pipeline_run_id,
+            error=error,
+            records_received=raw_record_count,
+        )
+        LOGGER.exception(
+            "Curated market-intelligence transformation failed",
+            extra={"pipeline_run_id": pipeline_run_id, "source": "curated"},
         )
         raise
     finally:

@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, text
 
 MIGRATIONS_DIRECTORY = Path(__file__).resolve().parents[2] / "sql" / "migrations"
+TRANSFORMS_DIRECTORY = Path(__file__).resolve().parents[2] / "sql" / "transforms"
 
 
 def create_database_engine(database_url: str) -> Engine:
@@ -74,6 +75,24 @@ def latest_rba_date(engine: Engine, series_code: str) -> date | None:
             ),
             {"series_code": series_code},
         ).scalar_one()
+
+
+def market_date_bounds(engine: Engine) -> tuple[date, date, int]:
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT
+                    min(trading_date) AS first_date,
+                    max(trading_date) AS last_date,
+                    count(*) AS record_count
+                FROM raw.market_index_daily
+                """
+            )
+        ).one()
+    if row.first_date is None or row.last_date is None:
+        raise RuntimeError("Cannot transform an empty raw market dataset")
+    return row.first_date, row.last_date, row.record_count
 
 
 def start_pipeline_run(
@@ -303,6 +322,67 @@ def upsert_rba_records(
     with engine.begin() as connection:
         connection.execute(statement, record_list)
     return len(record_list)
+
+
+def refresh_market_intelligence_daily(
+    engine: Engine, *, pipeline_run_id: int
+) -> int:
+    transform_path = (
+        TRANSFORMS_DIRECTORY / "refresh_market_intelligence_daily.sql"
+    )
+    if not transform_path.exists():
+        raise RuntimeError(f"Curated transformation not found: {transform_path}")
+    statement = text(transform_path.read_text(encoding="utf-8"))
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("DELETE FROM curated.market_intelligence_daily")
+        )
+        result = connection.execute(
+            statement,
+            {"pipeline_run_id": pipeline_run_id},
+        )
+        return result.rowcount
+
+
+def curated_quality_snapshot(engine: Engine) -> dict[str, Any]:
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                WITH latest AS (
+                    SELECT
+                        max(trading_date) AS latest_curated_date
+                    FROM curated.market_intelligence_daily
+                )
+                SELECT
+                    count(*) AS curated_count,
+                    min(curated.trading_date) AS first_curated_date,
+                    max(curated.trading_date) AS latest_curated_date,
+                    (SELECT max(trading_date) FROM raw.market_index_daily)
+                        AS latest_raw_market_date,
+                    count(*) FILTER (
+                        WHERE curated.rba_cash_rate_percent IS NULL
+                    ) AS missing_macro_count,
+                    count(*) FILTER (
+                        WHERE curated.trading_date >=
+                            latest.latest_curated_date - INTERVAL '90 days'
+                            AND (
+                                curated.rolling_average_20d IS NULL
+                                OR curated.return_20d_percent IS NULL
+                                OR curated.realized_volatility_14d_percent IS NULL
+                            )
+                    ) AS recent_incomplete_metric_count,
+                    count(*) FILTER (
+                        WHERE curated.rba_observation_date >
+                            curated.trading_date
+                    ) AS future_macro_count
+                FROM curated.market_intelligence_daily AS curated
+                CROSS JOIN latest
+                """
+            )
+        ).one()
+    return dict(row._mapping)
 
 
 def insert_quality_result(

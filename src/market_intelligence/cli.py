@@ -6,7 +6,11 @@ from datetime import date
 from market_intelligence.config import Settings
 from market_intelligence.database import apply_migrations, create_database_engine
 from market_intelligence.logging_config import configure_logging
-from market_intelligence.pipeline import run_rba_pipeline, run_yahoo_pipeline
+from market_intelligence.pipeline import (
+    run_curated_pipeline,
+    run_rba_pipeline,
+    run_yahoo_pipeline,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=date.today(),
         help="Inclusive extraction end date in YYYY-MM-DD format.",
     )
+    subparsers.add_parser(
+        "transform-curated",
+        help="Refresh the curated market-intelligence dataset and metrics.",
+    )
     return parser
 
 
@@ -54,6 +62,10 @@ def main() -> None:
 
     if args.command == "ingest-rba":
         run_rba_pipeline(settings, as_of_date=args.as_of)
+        return
+
+    if args.command == "transform-curated":
+        run_curated_pipeline(settings)
         return
 
     raise RuntimeError(f"Unsupported command: {args.command}")

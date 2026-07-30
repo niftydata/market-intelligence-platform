@@ -23,6 +23,7 @@ The first migration creates:
 
 - `raw.market_index_daily` for source-aligned daily index records;
 - `raw.rba_cash_rate_daily` for the RBA F1 `FIRMMCRID` series;
+- `curated.market_intelligence_daily` for the aligned analytical dataset;
 - `control.pipeline_run` for run status and record counts;
 - `control.data_quality_result` for explicit validation outcomes;
 - `control.rejected_record` for records that must not be silently discarded.
@@ -73,6 +74,12 @@ Run the RBA ingestion:
 market-intelligence ingest-rba
 ```
 
+Refresh the curated analytical dataset:
+
+```powershell
+market-intelligence transform-curated
+```
+
 For a reproducible historical run:
 
 ```powershell
@@ -118,6 +125,28 @@ date before accepting data. A dated row with a blank cash-rate value is retained
 in `control.rejected_record` and produces a quality warning; it is not silently
 dropped or forward-filled in the raw layer.
 
+## Curated analytical dataset
+
+`curated.market_intelligence_daily` has one row per ASX 200 trading date. It
+contains:
+
+- the closing index value and 20-trading-day rolling average;
+- 20-trading-day percentage return;
+- 14-trading-day annualised realised volatility;
+- the most recent RBA cash-rate observation on or before the trading date;
+- the RBA observation date and its age;
+- five-year volatility percentile thresholds and the resulting RAG status;
+- raw-source load timestamps and the transformation pipeline-run identifier.
+
+The transformation refreshes the table transactionally and checks that its
+latest date matches the raw market layer, no future macro observation is used,
+and the latest 90 days contain complete calculated metrics. Definitions and
+assumptions are documented in
+[`docs/metric_definitions.md`](docs/metric_definitions.md).
+
+AI-assisted development decisions and corrections are recorded in
+[`docs/ai-agent-log.md`](docs/ai-agent-log.md).
+
 ## Tests
 
 ```powershell
@@ -127,3 +156,15 @@ pytest
 The current tests cover Yahoo's multi-level response columns, timezone-aware
 trading dates, schema changes, invalid OHLC records, RBA metadata validation,
 date-window filtering, and missing RBA observations.
+
+The curated metric integration test is opt-in because it requires PostgreSQL:
+
+```powershell
+$env:INTEGRATION_DATABASE_URL = $env:DATABASE_URL
+pytest tests/test_curated_integration.py
+Remove-Item Env:INTEGRATION_DATABASE_URL
+```
+
+It independently recalculates the latest rolling average, return, and
+volatility from raw closing values and compares them with the persisted curated
+metrics.
