@@ -6,7 +6,7 @@ from datetime import date
 from market_intelligence.config import Settings
 from market_intelligence.database import apply_migrations, create_database_engine
 from market_intelligence.logging_config import configure_logging
-from market_intelligence.pipeline import run_yahoo_pipeline
+from market_intelligence.pipeline import run_rba_pipeline, run_yahoo_pipeline
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,6 +18,15 @@ def build_parser() -> argparse.ArgumentParser:
         "ingest-yahoo", help="Ingest daily Yahoo Finance market-index data."
     )
     ingest_parser.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        default=date.today(),
+        help="Inclusive extraction end date in YYYY-MM-DD format.",
+    )
+    rba_parser = subparsers.add_parser(
+        "ingest-rba", help="Ingest the RBA daily Interbank Overnight Cash Rate."
+    )
+    rba_parser.add_argument(
         "--as-of",
         type=date.fromisoformat,
         default=date.today(),
@@ -41,6 +50,10 @@ def main() -> None:
 
     if args.command == "ingest-yahoo":
         run_yahoo_pipeline(settings, as_of_date=args.as_of)
+        return
+
+    if args.command == "ingest-rba":
+        run_rba_pipeline(settings, as_of_date=args.as_of)
         return
 
     raise RuntimeError(f"Unsupported command: {args.command}")

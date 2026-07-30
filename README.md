@@ -4,9 +4,9 @@ An end-to-end market intelligence platform featuring repeatable data ingestion,
 data-quality validation, curated analytics, and interactive visualisation.
 
 The current vertical slice ingests five years of daily S&P/ASX 200 (`^AXJO`)
-history from Yahoo Finance into PostgreSQL. It validates each record, retains
-rejected records, records pipeline outcomes, and loads accepted observations
-idempotently.
+history from Yahoo Finance and the RBA Interbank Overnight Cash Rate into
+PostgreSQL. It validates each record, retains rejected records, records pipeline
+outcomes, and loads accepted observations idempotently.
 
 ## Persistence model
 
@@ -22,6 +22,7 @@ repository:
 The first migration creates:
 
 - `raw.market_index_daily` for source-aligned daily index records;
+- `raw.rba_cash_rate_daily` for the RBA F1 `FIRMMCRID` series;
 - `control.pipeline_run` for run status and record counts;
 - `control.data_quality_result` for explicit validation outcomes;
 - `control.rejected_record` for records that must not be silently discarded.
@@ -66,6 +67,12 @@ Run the Yahoo Finance ingestion through today's date:
 market-intelligence ingest-yahoo
 ```
 
+Run the RBA ingestion:
+
+```powershell
+market-intelligence ingest-rba
+```
+
 For a reproducible historical run:
 
 ```powershell
@@ -76,7 +83,9 @@ The first run requests five years of history. Subsequent runs start seven
 calendar days before the latest stored observation and upsert by
 `(instrument_code, trading_date)`.
 
-## Current data contract
+## Current data contracts
+
+### Yahoo Finance
 
 - Source: Yahoo Finance
 - Symbol: `^AXJO`
@@ -92,6 +101,23 @@ Yahoo Finance is the data source; `yfinance` is the transport library. The
 source response is treated as an external contract and is validated before
 persistence.
 
+### Reserve Bank of Australia
+
+- Source: RBA Statistical Table F1 CSV
+- Series: `FIRMMCRID`
+- Measure: Interbank Overnight Cash Rate
+- Frequency: daily
+- Unit: per cent
+- Business key: `(series_code, observation_date)`
+- Initial history: five years
+- Incremental overlap: seven calendar days
+
+The F1 download contains metadata rows before its observations. The ingestion
+validates the series identifier, title, frequency, unit, source, and publication
+date before accepting data. A dated row with a blank cash-rate value is retained
+in `control.rejected_record` and produces a quality warning; it is not silently
+dropped or forward-filled in the raw layer.
+
 ## Tests
 
 ```powershell
@@ -99,4 +125,5 @@ pytest
 ```
 
 The current tests cover Yahoo's multi-level response columns, timezone-aware
-trading dates, schema changes, and invalid OHLC records.
+trading dates, schema changes, invalid OHLC records, RBA metadata validation,
+date-window filtering, and missing RBA observations.

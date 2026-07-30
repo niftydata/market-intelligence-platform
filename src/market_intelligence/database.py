@@ -62,6 +62,20 @@ def latest_market_date(engine: Engine, instrument_code: str) -> date | None:
         ).scalar_one()
 
 
+def latest_rba_date(engine: Engine, series_code: str) -> date | None:
+    with engine.connect() as connection:
+        return connection.execute(
+            text(
+                """
+                SELECT max(observation_date)
+                FROM raw.rba_cash_rate_daily
+                WHERE series_code = :series_code
+                """
+            ),
+            {"series_code": series_code},
+        ).scalar_one()
+
+
 def start_pipeline_run(
     engine: Engine,
     *,
@@ -208,12 +222,16 @@ def upsert_market_records(
 
 
 def insert_rejected_records(
-    engine: Engine, *, pipeline_run_id: int, records: Iterable[dict[str, Any]]
+    engine: Engine,
+    *,
+    pipeline_run_id: int,
+    source_name: str,
+    records: Iterable[dict[str, Any]],
 ) -> int:
     record_list = [
         {
             "pipeline_run_id": pipeline_run_id,
-            "source_name": "yahoo_finance",
+            "source_name": source_name,
             "reason_code": record["reason_code"],
             "reason_detail": record["reason_detail"],
             "raw_payload": record["raw_payload"],
@@ -245,6 +263,45 @@ def insert_rejected_records(
             ),
             record_list,
         )
+    return len(record_list)
+
+
+def upsert_rba_records(
+    engine: Engine, *, pipeline_run_id: int, records: Iterable[dict[str, Any]]
+) -> int:
+    record_list = [dict(record, pipeline_run_id=pipeline_run_id) for record in records]
+    if not record_list:
+        return 0
+
+    statement = text(
+        """
+        INSERT INTO raw.rba_cash_rate_daily (
+            series_code,
+            observation_date,
+            rate_percent,
+            unit,
+            source_publication_date,
+            pipeline_run_id
+        )
+        VALUES (
+            :series_code,
+            :observation_date,
+            :rate_percent,
+            :unit,
+            :source_publication_date,
+            :pipeline_run_id
+        )
+        ON CONFLICT (series_code, observation_date)
+        DO UPDATE SET
+            rate_percent = EXCLUDED.rate_percent,
+            unit = EXCLUDED.unit,
+            source_publication_date = EXCLUDED.source_publication_date,
+            source_loaded_at = now(),
+            pipeline_run_id = EXCLUDED.pipeline_run_id
+        """
+    )
+    with engine.begin() as connection:
+        connection.execute(statement, record_list)
     return len(record_list)
 
 
