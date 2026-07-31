@@ -507,7 +507,11 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&display=swap');
 
-    #MainMenu, footer, header {visibility: hidden;}
+    #MainMenu, footer {visibility: hidden;}
+    header[data-testid="stHeader"] {
+        visibility: visible;
+        background: transparent;
+    }
     html, body, .stApp, input, textarea, select {
         font-family: "Noto Sans", Arial, sans-serif !important;
     }
