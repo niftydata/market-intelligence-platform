@@ -8,6 +8,7 @@ from datetime import date
 import pytest
 from sqlalchemy import create_engine, text
 
+import market_intelligence.database as database
 from market_intelligence.dashboard.data import load_dashboard_frame
 
 INTEGRATION_DATABASE_URL = os.getenv("INTEGRATION_DATABASE_URL")
@@ -95,3 +96,54 @@ def test_dashboard_window_ends_on_or_before_selected_date() -> None:
     assert (
         frame["trading_date"].max() - frame["trading_date"].min()
     ).days <= 90
+
+
+def test_failed_curated_validation_rolls_back_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    engine = create_engine(INTEGRATION_DATABASE_URL, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            before = connection.execute(
+                text(
+                    """
+                    SELECT count(*) AS row_count, max(trading_date) AS latest_date
+                    FROM curated.market_intelligence_daily
+                    """
+                )
+            ).one()
+            pipeline_run_id = connection.execute(
+                text(
+                    """
+                    SELECT pipeline_run_id
+                    FROM control.pipeline_run
+                    ORDER BY pipeline_run_id DESC
+                    LIMIT 1
+                    """
+                )
+            ).scalar_one()
+
+        transform_path = tmp_path / "refresh_market_intelligence_daily.sql"
+        transform_path.write_text("SELECT 1 WHERE false;", encoding="utf-8")
+        monkeypatch.setattr(database, "TRANSFORMS_DIRECTORY", tmp_path)
+
+        with pytest.raises(RuntimeError, match="curated dataset is empty"):
+            database.refresh_market_intelligence_daily(
+                engine,
+                pipeline_run_id=pipeline_run_id,
+            )
+
+        with engine.connect() as connection:
+            after = connection.execute(
+                text(
+                    """
+                    SELECT count(*) AS row_count, max(trading_date) AS latest_date
+                    FROM curated.market_intelligence_daily
+                    """
+                )
+            ).one()
+    finally:
+        engine.dispose()
+
+    assert after == before

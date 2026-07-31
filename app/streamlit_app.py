@@ -4,7 +4,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -26,7 +26,11 @@ from market_intelligence.dashboard.data import (
     load_dashboard_frame,
     load_dashboard_metadata,
 )
-from market_intelligence.database import create_database_engine
+from market_intelligence.database import (
+    RefreshAlreadyRunningError,
+    create_database_engine,
+)
+from market_intelligence.pipeline import run_full_refresh
 
 SYDNEY_TIMEZONE = ZoneInfo("Australia/Sydney")
 NAVY = "#16324F"
@@ -254,6 +258,81 @@ def environment_flag(name: str, *, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def data_refresh_control() -> None:
+    st.markdown("### Data refresh")
+    st.caption(
+        "Refresh Yahoo Finance and RBA source data, validate it, "
+        "then rebuild the curated analytics."
+    )
+    if st.button(
+        "Refresh Yahoo + RBA",
+        type="primary",
+        use_container_width=True,
+    ):
+        reference_id = uuid.uuid4().hex[:8].upper()
+        try:
+            with st.spinner("Refreshing sources and validating the analytics..."):
+                refresh_result = run_full_refresh(
+                    Settings.from_environment(),
+                    as_of_date=datetime.now(SYDNEY_TIMEZONE).date(),
+                )
+            st.session_state.data_refresh_summary = {
+                "succeeded": refresh_result.succeeded,
+                "reference_id": reference_id,
+                "completed_at": datetime.now(SYDNEY_TIMEZONE).strftime(
+                    "%d/%m/%Y %H:%M"
+                ),
+                "rows": [
+                    {
+                        "Stage": stage.stage,
+                        "Status": stage.status.title(),
+                        "Received": stage.records_received,
+                        "Accepted": stage.records_accepted,
+                        "Rejected": stage.records_rejected,
+                    }
+                    for stage in refresh_result.stages
+                ],
+            }
+            dashboard_metadata.clear()
+            dashboard_frame.clear()
+            if refresh_result.succeeded:
+                st.session_state.refresh_select_latest = True
+            st.rerun()
+        except RefreshAlreadyRunningError:
+            st.info(
+                "A data refresh is already running. "
+                "Please wait for it to finish."
+            )
+        except Exception:
+            LOGGER.exception(
+                "Full data refresh failed reference_id=%s",
+                reference_id,
+            )
+            st.error(
+                "The refresh could not start. Existing dashboard data "
+                f"remains available. Reference: {reference_id}"
+            )
+
+    refresh_summary = st.session_state.get("data_refresh_summary")
+    if refresh_summary:
+        if refresh_summary["succeeded"]:
+            st.success(
+                "Refresh completed successfully at "
+                f"{refresh_summary['completed_at']}."
+            )
+        else:
+            st.warning(
+                "One or more refresh stages failed. The last validated "
+                "dashboard remains available. "
+                f"Reference: {refresh_summary['reference_id']}"
+            )
+        st.dataframe(
+            pd.DataFrame(refresh_summary["rows"]),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+
 def ai_assistant_sidebar(analysis_end_date: date) -> None:
     enabled = environment_flag("ENABLE_AI_ASSISTANT")
     configured_username = os.getenv("AI_DEMO_USERNAME", "")
@@ -286,6 +365,8 @@ def ai_assistant_sidebar(analysis_end_date: date) -> None:
                 st.session_state.ai_panel_open = False
                 st.session_state.ai_messages = []
                 st.rerun()
+
+            data_refresh_control()
 
             try:
                 FoundrySettings.from_environment()
@@ -501,6 +582,14 @@ st.markdown(
         color: #16324F;
         letter-spacing: -0.02em;
     }
+    section[data-testid="stSidebar"] div[data-testid="stChatInput"] {
+        position: sticky;
+        bottom: 0.75rem;
+        z-index: 20;
+        background: #FFFFFF;
+        border-radius: 12px;
+        box-shadow: 0 -10px 22px rgba(255, 255, 255, 0.96);
+    }
     div[data-testid="stMetric"] {
         background: white;
         border: 1px solid #E1E8EF;
@@ -577,6 +666,12 @@ except Exception:
     )
     st.stop()
 
+if (
+    st.session_state.pop("refresh_select_latest", False)
+    or "analysis_end_date" not in st.session_state
+):
+    st.session_state.analysis_end_date = metadata.latest_curated_date
+
 logo_path = Path(__file__).resolve().parent / "assets" / "niftydata-logo.png"
 logo_left, logo_column, logo_right = st.columns([0.325, 0.35, 0.325])
 with logo_column:
@@ -590,10 +685,10 @@ with st.container(key="market-pulse-hero"):
     with date_column:
         selected_end_date = st.date_input(
             "Analysis Ending",
-            value=metadata.latest_curated_date,
             min_value=metadata.first_curated_date,
             max_value=metadata.latest_curated_date,
             format="DD/MM/YYYY",
+            key="analysis_end_date",
             help="Select the end date for the trailing 90-calendar-day analysis.",
         )
 

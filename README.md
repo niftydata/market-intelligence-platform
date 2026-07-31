@@ -204,8 +204,16 @@ remains public; only the Ask AI panel requires authentication. Five failed
 sign-in attempts lock that browser session for 60 seconds. Authenticated
 sessions are limited to 20 Foundry questions before the conversation is reset.
 
+The same authenticated sidebar includes an operational data refresh. It runs
+the Yahoo Finance and RBA incremental ingestions, then rebuilds the curated
+analytics only when both sources succeed. PostgreSQL advisory locking prevents
+overlapping refreshes. The dashboard reports received, accepted, and rejected
+rows for each stage, and the curated replacement is rolled back if its quality
+checks fail so the last validated dashboard remains available.
+
 The dashboard is read-only and queries only curated and operational metadata.
-It does not perform ingestion or transformation work in a web request.
+Only an authenticated refresh action performs ingestion or transformation
+work in the web process.
 
 The complete Render and DNS handoff is in
 [`docs/render-deployment.md`](docs/render-deployment.md).

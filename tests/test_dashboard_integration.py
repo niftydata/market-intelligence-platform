@@ -40,7 +40,7 @@ def test_dashboard_renders_without_runtime_exceptions(
         ),
     )
     monkeypatch.setenv("FOUNDRY_AGENT_NAME", "test-agent")
-    monkeypatch.setenv("FOUNDRY_AGENT_VERSION", "2")
+    monkeypatch.setenv("FOUNDRY_AGENT_VERSION", "3")
     monkeypatch.setenv("AZURE_TENANT_ID", "test-tenant")
     monkeypatch.setenv("AZURE_CLIENT_ID", "test-client")
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "test-secret")
@@ -60,6 +60,7 @@ def test_dashboard_renders_without_runtime_exceptions(
     assert app.success[0].value == "Signed in as macquarie"
     assert len(app.chat_input) == 1
     assert len(app.date_input) == 1
+    assert "Refresh Yahoo + RBA" in [button.label for button in app.button]
 
     app.date_input[0].set_value(date(2026, 6, 28)).run()
 

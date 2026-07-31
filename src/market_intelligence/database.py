@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from sqlalchemy import Engine, create_engine, text
 
 MIGRATIONS_DIRECTORY = Path(__file__).resolve().parents[2] / "sql" / "migrations"
 TRANSFORMS_DIRECTORY = Path(__file__).resolve().parents[2] / "sql" / "transforms"
+REFRESH_ADVISORY_LOCK_ID = 6_407_202_026
 
 
 def create_database_engine(database_url: str) -> Engine:
@@ -345,7 +347,7 @@ def upsert_rba_records(
 
 def refresh_market_intelligence_daily(
     engine: Engine, *, pipeline_run_id: int
-) -> int:
+) -> tuple[int, dict[str, Any]]:
     transform_path = (
         TRANSFORMS_DIRECTORY / "refresh_market_intelligence_daily.sql"
     )
@@ -361,47 +363,118 @@ def refresh_market_intelligence_daily(
             statement,
             {"pipeline_run_id": pipeline_run_id},
         )
-        return result.rowcount
+        snapshot = _curated_quality_snapshot(connection)
+        hard_failures: list[str] = []
+        if snapshot["curated_count"] == 0:
+            hard_failures.append("curated dataset is empty")
+        if snapshot["latest_curated_date"] != snapshot["latest_raw_market_date"]:
+            hard_failures.append("curated latest date does not match raw market data")
+        if snapshot["future_macro_count"] != 0:
+            hard_failures.append("curated rows contain future macro observations")
+        if snapshot["recent_incomplete_metric_count"] != 0:
+            hard_failures.append(
+                f"{snapshot['recent_incomplete_metric_count']} recent curated rows "
+                "have incomplete metrics"
+            )
+        if hard_failures:
+            raise RuntimeError("; ".join(hard_failures))
+        return result.rowcount, snapshot
 
 
 def curated_quality_snapshot(engine: Engine) -> dict[str, Any]:
     with engine.connect() as connection:
+        return _curated_quality_snapshot(connection)
+
+
+def _curated_quality_snapshot(connection: Any) -> dict[str, Any]:
+    row = connection.execute(
+        text(
+            """
+            WITH latest AS (
+                SELECT
+                    max(trading_date) AS latest_curated_date
+                FROM curated.market_intelligence_daily
+            )
+            SELECT
+                count(*) AS curated_count,
+                min(curated.trading_date) AS first_curated_date,
+                max(curated.trading_date) AS latest_curated_date,
+                (SELECT max(trading_date) FROM raw.market_index_daily)
+                    AS latest_raw_market_date,
+                count(*) FILTER (
+                    WHERE curated.rba_cash_rate_percent IS NULL
+                ) AS missing_macro_count,
+                count(*) FILTER (
+                    WHERE curated.trading_date >=
+                        latest.latest_curated_date - INTERVAL '90 days'
+                        AND (
+                            curated.rolling_average_20d IS NULL
+                            OR curated.return_20d_percent IS NULL
+                            OR curated.realized_volatility_14d_percent IS NULL
+                        )
+                ) AS recent_incomplete_metric_count,
+                count(*) FILTER (
+                    WHERE curated.rba_observation_date >
+                        curated.trading_date
+                ) AS future_macro_count
+            FROM curated.market_intelligence_daily AS curated
+            CROSS JOIN latest
+            """
+        )
+    ).one()
+    return dict(row._mapping)
+
+
+def pipeline_run_result(engine: Engine, pipeline_run_id: int) -> dict[str, Any]:
+    with engine.connect() as connection:
         row = connection.execute(
             text(
                 """
-                WITH latest AS (
-                    SELECT
-                        max(trading_date) AS latest_curated_date
-                    FROM curated.market_intelligence_daily
-                )
                 SELECT
-                    count(*) AS curated_count,
-                    min(curated.trading_date) AS first_curated_date,
-                    max(curated.trading_date) AS latest_curated_date,
-                    (SELECT max(trading_date) FROM raw.market_index_daily)
-                        AS latest_raw_market_date,
-                    count(*) FILTER (
-                        WHERE curated.rba_cash_rate_percent IS NULL
-                    ) AS missing_macro_count,
-                    count(*) FILTER (
-                        WHERE curated.trading_date >=
-                            latest.latest_curated_date - INTERVAL '90 days'
-                            AND (
-                                curated.rolling_average_20d IS NULL
-                                OR curated.return_20d_percent IS NULL
-                                OR curated.realized_volatility_14d_percent IS NULL
-                            )
-                    ) AS recent_incomplete_metric_count,
-                    count(*) FILTER (
-                        WHERE curated.rba_observation_date >
-                            curated.trading_date
-                    ) AS future_macro_count
-                FROM curated.market_intelligence_daily AS curated
-                CROSS JOIN latest
+                    pipeline_run_id,
+                    pipeline_name,
+                    status,
+                    records_received,
+                    records_accepted,
+                    records_rejected,
+                    started_at,
+                    finished_at,
+                    error_type
+                FROM control.pipeline_run
+                WHERE pipeline_run_id = :pipeline_run_id
                 """
-            )
+            ),
+            {"pipeline_run_id": pipeline_run_id},
         ).one()
     return dict(row._mapping)
+
+
+@contextmanager
+def data_refresh_lock(engine: Engine):
+    with engine.connect() as connection:
+        acquired = bool(
+            connection.execute(
+                text("SELECT pg_try_advisory_lock(:lock_id)"),
+                {"lock_id": REFRESH_ADVISORY_LOCK_ID},
+            ).scalar_one()
+        )
+        connection.commit()
+        if not acquired:
+            raise RefreshAlreadyRunningError(
+                "Another data refresh is already running"
+            )
+        try:
+            yield
+        finally:
+            connection.execute(
+                text("SELECT pg_advisory_unlock(:lock_id)"),
+                {"lock_id": REFRESH_ADVISORY_LOCK_ID},
+            )
+            connection.commit()
+
+
+class RefreshAlreadyRunningError(RuntimeError):
+    pass
 
 
 def insert_quality_result(

@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any
 
 from market_intelligence.config import Settings
 from market_intelligence.database import (
     complete_pipeline_run,
     create_database_engine,
-    curated_quality_snapshot,
+    data_refresh_lock,
     fail_pipeline_run,
     insert_quality_result,
     insert_rejected_records,
     latest_market_date,
     latest_rba_date,
     market_date_bounds,
+    pipeline_run_result,
     refresh_market_intelligence_daily,
     start_pipeline_run,
     upsert_market_records,
@@ -33,6 +37,32 @@ LOGGER = logging.getLogger(__name__)
 PIPELINE_NAME = "yahoo_market_index_daily"
 RBA_PIPELINE_NAME = "rba_interbank_cash_rate_daily"
 CURATED_PIPELINE_NAME = "curated_market_intelligence_daily"
+
+
+@dataclass(frozen=True)
+class RefreshStageResult:
+    stage: str
+    status: str
+    records_received: int
+    records_accepted: int
+    records_rejected: int
+    pipeline_run_id: int | None
+
+
+@dataclass(frozen=True)
+class FullRefreshResult:
+    stages: tuple[RefreshStageResult, ...]
+
+    @property
+    def succeeded(self) -> bool:
+        return all(stage.status == "succeeded" for stage in self.stages)
+
+
+class PipelineExecutionError(RuntimeError):
+    def __init__(self, pipeline_name: str, pipeline_run_id: int) -> None:
+        self.pipeline_name = pipeline_name
+        self.pipeline_run_id = pipeline_run_id
+        super().__init__(f"Pipeline failed: {pipeline_name}")
 
 
 def run_yahoo_pipeline(settings: Settings, *, as_of_date: date) -> int:
@@ -138,7 +168,7 @@ def run_yahoo_pipeline(settings: Settings, *, as_of_date: date) -> int:
             "Yahoo Finance ingestion failed",
             extra={"pipeline_run_id": pipeline_run_id, "source": "yahoo_finance"},
         )
-        raise
+        raise PipelineExecutionError(PIPELINE_NAME, pipeline_run_id) from error
     finally:
         engine.dispose()
 
@@ -248,7 +278,7 @@ def run_rba_pipeline(settings: Settings, *, as_of_date: date) -> int:
                 "source": "reserve_bank_of_australia",
             },
         )
-        raise
+        raise PipelineExecutionError(RBA_PIPELINE_NAME, pipeline_run_id) from error
     finally:
         engine.dispose()
 
@@ -276,20 +306,10 @@ def run_curated_pipeline(settings: Settings) -> int:
     )
 
     try:
-        refreshed_count = refresh_market_intelligence_daily(
+        refreshed_count, snapshot = refresh_market_intelligence_daily(
             engine,
             pipeline_run_id=pipeline_run_id,
         )
-        snapshot = curated_quality_snapshot(engine)
-        hard_failures: list[str] = []
-        if snapshot["curated_count"] == 0:
-            hard_failures.append("curated dataset is empty")
-        if snapshot["latest_curated_date"] != snapshot["latest_raw_market_date"]:
-            hard_failures.append("curated latest date does not match raw market data")
-        if snapshot["future_macro_count"] != 0:
-            hard_failures.append("curated rows contain future macro observations")
-        if hard_failures:
-            raise RuntimeError("; ".join(hard_failures))
 
         macro_missing = int(snapshot["missing_macro_count"])
         insert_quality_result(
@@ -319,11 +339,6 @@ def run_curated_pipeline(settings: Settings) -> int:
             records_failed=incomplete_metrics,
             details=json.dumps({"window": "latest 90 calendar days"}),
         )
-        if incomplete_metrics:
-            raise RuntimeError(
-                f"{incomplete_metrics} recent curated rows have incomplete metrics"
-            )
-
         complete_pipeline_run(
             engine,
             pipeline_run_id=pipeline_run_id,
@@ -351,7 +366,7 @@ def run_curated_pipeline(settings: Settings) -> int:
             "Curated market-intelligence transformation failed",
             extra={"pipeline_run_id": pipeline_run_id, "source": "curated"},
         )
-        raise
+        raise PipelineExecutionError(CURATED_PIPELINE_NAME, pipeline_run_id) from error
     finally:
         engine.dispose()
 
@@ -362,3 +377,94 @@ def _subtract_years(value: date, years: int) -> date:
     except ValueError:
         # 29 February maps to 28 February in a non-leap target year.
         return value.replace(month=2, day=28, year=value.year - years)
+
+
+def run_full_refresh(settings: Settings, *, as_of_date: date) -> FullRefreshResult:
+    engine = create_database_engine(settings.database_url)
+    stages: list[RefreshStageResult] = []
+    source_succeeded = True
+    try:
+        with data_refresh_lock(engine):
+            source_pipelines: tuple[
+                tuple[str, Callable[..., int]],
+                ...,
+            ] = (
+                ("Yahoo Finance", run_yahoo_pipeline),
+                ("RBA cash rate", run_rba_pipeline),
+            )
+            for stage_name, pipeline in source_pipelines:
+                stage = _execute_refresh_stage(
+                    stage_name,
+                    engine,
+                    lambda pipeline=pipeline: pipeline(
+                        settings,
+                        as_of_date=as_of_date,
+                    ),
+                )
+                stages.append(stage)
+                source_succeeded = source_succeeded and stage.status == "succeeded"
+
+            if source_succeeded:
+                stages.append(
+                    _execute_refresh_stage(
+                        "Curated analytics",
+                        engine,
+                        lambda: run_curated_pipeline(settings),
+                    )
+                )
+            else:
+                stages.append(
+                    RefreshStageResult(
+                        stage="Curated analytics",
+                        status="skipped",
+                        records_received=0,
+                        records_accepted=0,
+                        records_rejected=0,
+                        pipeline_run_id=None,
+                    )
+                )
+    finally:
+        engine.dispose()
+    return FullRefreshResult(stages=tuple(stages))
+
+
+def _execute_refresh_stage(
+    stage_name: str,
+    engine: Any,
+    pipeline: Callable[[], int],
+) -> RefreshStageResult:
+    try:
+        pipeline_run_id = pipeline()
+    except PipelineExecutionError as error:
+        return _refresh_stage_from_run(
+            stage_name,
+            pipeline_run_result(engine, error.pipeline_run_id),
+        )
+    except Exception:
+        LOGGER.exception("Refresh stage failed before a pipeline run was created")
+        return RefreshStageResult(
+            stage=stage_name,
+            status="failed",
+            records_received=0,
+            records_accepted=0,
+            records_rejected=0,
+            pipeline_run_id=None,
+        )
+    return _refresh_stage_from_run(
+        stage_name,
+        pipeline_run_result(engine, pipeline_run_id),
+    )
+
+
+def _refresh_stage_from_run(
+    stage_name: str,
+    run: dict[str, Any],
+) -> RefreshStageResult:
+    return RefreshStageResult(
+        stage=stage_name,
+        status=str(run["status"]),
+        records_received=int(run["records_received"]),
+        records_accepted=int(run["records_accepted"]),
+        records_rejected=int(run["records_rejected"]),
+        pipeline_run_id=int(run["pipeline_run_id"]),
+    )
