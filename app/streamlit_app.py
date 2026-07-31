@@ -16,7 +16,6 @@ from plotly.subplots import make_subplots
 
 from market_intelligence.assistant.foundry import (
     FoundryAssistant,
-    FoundryDiagnosticError,
     FoundrySettings,
 )
 from market_intelligence.config import Settings
@@ -33,14 +32,14 @@ from market_intelligence.database import (
 from market_intelligence.pipeline import run_full_refresh
 
 SYDNEY_TIMEZONE = ZoneInfo("Australia/Sydney")
-NAVY = "#16324F"
-TEAL = "#147D92"
-ORANGE = "#D97706"
+NAVY = "#050505"
+TEAL = "#3563FF"
+ORANGE = "#606060"
 GREEN = "#167A5A"
 AMBER = "#B66A00"
 RED = "#B42318"
-MUTED = "#667085"
-GRID = "#E7ECF2"
+MUTED = "#5E5E5E"
+GRID = "#E2E2E2"
 LOGGER = logging.getLogger(__name__)
 
 load_dotenv()
@@ -118,7 +117,7 @@ def market_chart(frame: pd.DataFrame) -> go.Figure:
             y=frame["close_value"],
             name="ASX 200 close",
             mode="lines",
-            line={"color": NAVY, "width": 2.8},
+            line={"color": TEAL, "width": 2.8},
             hovertemplate="%{x|%d %b %Y}<br>Close %{y:,.1f}<extra></extra>",
         ),
         secondary_y=False,
@@ -129,7 +128,7 @@ def market_chart(frame: pd.DataFrame) -> go.Figure:
             y=frame["rolling_average_20d"],
             name="20-day average",
             mode="lines",
-            line={"color": TEAL, "width": 2.2, "dash": "dash"},
+            line={"color": NAVY, "width": 2.2, "dash": "dash"},
             hovertemplate="%{x|%d %b %Y}<br>20D avg %{y:,.1f}<extra></extra>",
         ),
         secondary_y=False,
@@ -170,7 +169,7 @@ def market_chart(frame: pd.DataFrame) -> go.Figure:
             "xanchor": "left",
             "x": 0,
         },
-        font={"family": "Arial, sans-serif", "color": NAVY},
+        font={"family": "Noto Sans, Arial, sans-serif", "color": NAVY},
     )
     return figure
 
@@ -185,8 +184,8 @@ def volatility_chart(frame: pd.DataFrame) -> go.Figure:
             name="14-day annualised volatility",
             mode="lines",
             fill="tozeroy",
-            fillcolor="rgba(20, 125, 146, 0.10)",
-            line={"color": TEAL, "width": 2.4},
+            fillcolor="rgba(5, 5, 5, 0.06)",
+            line={"color": NAVY, "width": 2.4},
             hovertemplate="%{x|%d %b %Y}<br>Volatility %{y:.1f}%<extra></extra>",
         )
     )
@@ -217,7 +216,7 @@ def volatility_chart(frame: pd.DataFrame) -> go.Figure:
             "gridcolor": GRID,
             "rangemode": "tozero",
         },
-        font={"family": "Arial, sans-serif", "color": NAVY},
+        font={"family": "Noto Sans, Arial, sans-serif", "color": NAVY},
     )
     return figure
 
@@ -387,38 +386,6 @@ def ai_assistant_sidebar(analysis_end_date: date) -> None:
                 )
                 return
 
-            if st.button("Test Foundry connection", use_container_width=True):
-                reference_id = uuid.uuid4().hex[:8].upper()
-                try:
-                    with st.spinner("Testing database, Azure identity and model..."):
-                        diagnostic = foundry_assistant().diagnose()
-                    st.success(
-                        "Connection passed: database, Azure token and Foundry agent."
-                    )
-                    st.caption(
-                        f"Historical data: {diagnostic['database']} · "
-                        f"Agent: {diagnostic['foundry_agent']}"
-                    )
-                except FoundryDiagnosticError as exc:
-                    LOGGER.exception(
-                        "Foundry diagnostic failed reference_id=%s stage=%s",
-                        reference_id,
-                        exc.stage,
-                    )
-                    st.error(
-                        f"Connection failed at {exc.stage}. "
-                        f"Reference: {reference_id}"
-                    )
-                except Exception:
-                    LOGGER.exception(
-                        "Foundry diagnostic failed reference_id=%s stage=initialization",
-                        reference_id,
-                    )
-                    st.error(
-                        "Connection diagnostic could not start. "
-                        f"Reference: {reference_id}"
-                    )
-
             messages = st.session_state.setdefault("ai_messages", [])
             if not messages:
                 messages.append(
@@ -538,15 +505,23 @@ def ai_assistant_sidebar(analysis_end_date: date) -> None:
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&display=swap');
+
     #MainMenu, footer, header {visibility: hidden;}
-    .stApp {background: #F4F7FA;}
+    html, body, [class*="st-"], .stApp, button, input, textarea, select {
+        font-family: "Noto Sans", Arial, sans-serif !important;
+    }
+    .stApp {
+        background: #F5F5F3;
+        color: #050505;
+    }
     .block-container {
         max-width: 1240px;
         padding-top: 1.6rem;
         padding-bottom: 2rem;
     }
     .brand {
-        color: #147D92;
+        color: #050505;
         font-size: 0.76rem;
         font-weight: 800;
         letter-spacing: 0.18em;
@@ -554,21 +529,24 @@ st.markdown(
         margin-bottom: 0.35rem;
     }
     .st-key-market-pulse-hero {
-        background: linear-gradient(120deg, #16324F 0%, #1E4969 70%, #147D92 140%);
-        border-radius: 18px;
+        background: #050505;
+        border: 1px solid #050505;
+        border-radius: 0;
         padding: 1.35rem 1.8rem 1.15rem;
         margin-bottom: 1rem;
-        box-shadow: 0 12px 30px rgba(22, 50, 79, 0.16);
+        box-shadow: none;
     }
     .st-key-market-pulse-hero h1 {
         color: white;
-        font-size: 2rem;
+        font-size: 1.8rem;
+        font-weight: 800;
         line-height: 1.15;
         margin: 0 0 0.4rem;
-        letter-spacing: -0.025em;
+        letter-spacing: -0.035em;
+        text-transform: uppercase;
     }
     .st-key-market-pulse-hero .pulse-subtitle {
-        color: #DCE8F1;
+        color: #F0F0F0;
         margin: 0;
         font-size: 0.98rem;
     }
@@ -580,16 +558,19 @@ st.markdown(
         text-transform: uppercase;
     }
     .st-key-market-pulse-hero [data-testid="stDateInput"] input {
-        color: #16324F;
+        color: #050505;
+        background: #FFFFFF;
+        border-radius: 0;
         font-size: 1.05rem;
         font-weight: 750;
         min-height: 2.8rem;
     }
     section[data-testid="stSidebar"] {
-        border-right: 1px solid #DDE5EC;
+        background: #FFFFFF;
+        border-right: 1px solid #050505;
     }
     section[data-testid="stSidebar"] h2 {
-        color: #16324F;
+        color: #050505;
         letter-spacing: -0.02em;
     }
     section[data-testid="stSidebar"] div[data-testid="stChatInput"] {
@@ -600,33 +581,60 @@ st.markdown(
         border-radius: 12px;
         box-shadow: 0 -10px 22px rgba(255, 255, 255, 0.96);
     }
-    div[data-testid="stMetric"] {
-        background: white;
-        border: 1px solid #E1E8EF;
-        border-radius: 14px;
-        padding: 1rem 1.05rem;
-        box-shadow: 0 5px 16px rgba(22, 50, 79, 0.06);
+    .stButton button,
+    .stFormSubmitButton button {
+        border: 1px solid #050505;
+        border-radius: 0;
+        font-weight: 700;
     }
-    div[data-testid="stMetricLabel"] {color: #667085; font-weight: 650;}
-    div[data-testid="stMetricValue"] {color: #16324F; font-weight: 750;}
+    .stButton button[kind="primary"],
+    .stFormSubmitButton button[kind="primary"] {
+        background: #050505;
+        border-color: #050505;
+        color: #FFFFFF;
+    }
+    .stButton button[kind="primary"]:hover,
+    .stFormSubmitButton button[kind="primary"]:hover {
+        background: #2B2B2B;
+        border-color: #2B2B2B;
+        color: #FFFFFF;
+    }
+    div[data-testid="stMetric"] {
+        background: #FFFFFF;
+        border: 1px solid #050505;
+        border-radius: 0;
+        padding: 1rem 1.05rem;
+        box-shadow: none;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #303030;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    div[data-testid="stMetricValue"] {color: #050505; font-weight: 800;}
+    div[data-testid="stMetricDelta"] {color: #3563FF;}
     .section-title {
-        color: #16324F;
+        color: #050505;
         font-size: 1.1rem;
-        font-weight: 750;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        text-transform: uppercase;
         margin: 1.1rem 0 0.15rem;
     }
     .section-subtitle {
-        color: #667085;
+        color: #5E5E5E;
         font-size: 0.88rem;
         margin-bottom: 0.55rem;
     }
     .signal-card {
-        background: white;
-        border: 1px solid #E1E8EF;
-        border-radius: 15px;
+        background: #FFFFFF;
+        border: 1px solid #050505;
+        border-radius: 0;
         padding: 1.1rem 1.2rem;
         min-height: 122px;
-        box-shadow: 0 5px 16px rgba(22, 50, 79, 0.06);
+        box-shadow: none;
     }
     .signal-label {
         display: inline-block;
@@ -638,26 +646,36 @@ st.markdown(
         padding: 0.25rem 0.65rem;
         margin-bottom: 0.65rem;
     }
-    .signal-title {color: #16324F; font-weight: 760; font-size: 1.08rem;}
-    .signal-detail {color: #667085; font-size: 0.84rem; margin-top: 0.35rem;}
+    .signal-title {color: #050505; font-weight: 800; font-size: 1.08rem;}
+    .signal-detail {color: #5E5E5E; font-size: 0.84rem; margin-top: 0.35rem;}
     .story-card {
-        background: white;
-        border-left: 4px solid #147D92;
-        border-radius: 12px;
+        background: #FFFFFF;
+        border: 1px solid #050505;
+        border-left: 4px solid #050505;
+        border-radius: 0;
         padding: 1rem 1.1rem;
-        color: #344054;
+        color: #303030;
         margin-top: 0.7rem;
     }
-    .story-card strong {color: #16324F;}
+    .story-card strong {color: #050505;}
+    div[data-testid="stPlotlyChart"] {
+        background: #FFFFFF;
+        border: 1px solid #050505;
+        padding: 0.45rem;
+    }
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #050505;
+        border-radius: 0;
+    }
     .freshness {
-        color: #667085;
+        color: #5E5E5E;
         font-size: 0.78rem;
         text-align: right;
         margin: 0.4rem 0 0.8rem;
     }
     .disclaimer {
-        border-top: 1px solid #DDE5EC;
-        color: #7A8695;
+        border-top: 1px solid #050505;
+        color: #5E5E5E;
         font-size: 0.74rem;
         margin-top: 1.5rem;
         padding-top: 0.9rem;
