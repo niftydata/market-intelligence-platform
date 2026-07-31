@@ -33,10 +33,14 @@ def test_dashboard_renders_without_runtime_exceptions(
         ),
     )
     monkeypatch.setenv(
-        "FOUNDRY_PROJECT_ENDPOINT",
-        "https://example.services.ai.azure.com/api/projects/example",
+        "FOUNDRY_AGENT_ENDPOINT",
+        (
+            "https://example.services.ai.azure.com/api/projects/example/"
+            "agents/test-agent/endpoint/protocols/openai/responses"
+        ),
     )
-    monkeypatch.setenv("FOUNDRY_MODEL", "test-model")
+    monkeypatch.setenv("FOUNDRY_AGENT_NAME", "test-agent")
+    monkeypatch.setenv("FOUNDRY_AGENT_VERSION", "2")
     monkeypatch.setenv("AZURE_TENANT_ID", "test-tenant")
     monkeypatch.setenv("AZURE_CLIENT_ID", "test-client")
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "test-secret")

@@ -196,7 +196,8 @@ The Render web service requires these secret environment variables:
 - `AI_DEMO_PASSWORD_HASH`: PBKDF2 hash for the password protecting the optional
   Ask AI panel. Never store the plaintext password in source control.
 - `AZURE_CLIENT_SECRET`: service-principal secret used by the server to call
-  the Microsoft Foundry project. Add it directly in Render.
+  the agent-scoped Microsoft Foundry Responses endpoint. Add it directly in
+  Render.
 
 The non-secret AI demo settings are defined in `render.yaml`. The dashboard
 remains public; only the Ask AI panel requires authentication. Five failed

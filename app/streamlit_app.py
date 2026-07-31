@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
+import uuid
 from datetime import date
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,7 +14,11 @@ import streamlit as st
 from dotenv import load_dotenv
 from plotly.subplots import make_subplots
 
-from market_intelligence.assistant.foundry import FoundryAssistant, FoundrySettings
+from market_intelligence.assistant.foundry import (
+    FoundryAssistant,
+    FoundryDiagnosticError,
+    FoundrySettings,
+)
 from market_intelligence.config import Settings
 from market_intelligence.dashboard.auth import verify_credentials
 from market_intelligence.dashboard.data import (
@@ -31,6 +37,7 @@ AMBER = "#B66A00"
 RED = "#B42318"
 MUTED = "#667085"
 GRID = "#E7ECF2"
+LOGGER = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -289,6 +296,38 @@ def ai_assistant_sidebar(analysis_end_date: date) -> None:
                 )
                 return
 
+            if st.button("Test Foundry connection", use_container_width=True):
+                reference_id = uuid.uuid4().hex[:8].upper()
+                try:
+                    with st.spinner("Testing database, Azure identity and model..."):
+                        diagnostic = foundry_assistant().diagnose()
+                    st.success(
+                        "Connection passed: database, Azure token and Foundry agent."
+                    )
+                    st.caption(
+                        f"Historical data: {diagnostic['database']} · "
+                        f"Agent: {diagnostic['foundry_agent']}"
+                    )
+                except FoundryDiagnosticError as exc:
+                    LOGGER.exception(
+                        "Foundry diagnostic failed reference_id=%s stage=%s",
+                        reference_id,
+                        exc.stage,
+                    )
+                    st.error(
+                        f"Connection failed at {exc.stage}. "
+                        f"Reference: {reference_id}"
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "Foundry diagnostic failed reference_id=%s stage=initialization",
+                        reference_id,
+                    )
+                    st.error(
+                        "Connection diagnostic could not start. "
+                        f"Reference: {reference_id}"
+                    )
+
             messages = st.session_state.setdefault("ai_messages", [])
             if not messages:
                 messages.append(
@@ -336,9 +375,15 @@ def ai_assistant_sidebar(analysis_end_date: date) -> None:
                         conversation=prior_conversation,
                     )
             except Exception:
+                reference_id = uuid.uuid4().hex[:8].upper()
+                LOGGER.exception(
+                    "Foundry assistant request failed reference_id=%s",
+                    reference_id,
+                )
                 answer = (
                     "The AI assistant is temporarily unavailable. "
-                    "The dashboard data has not been affected."
+                    "The dashboard data has not been affected. "
+                    f"Reference: {reference_id}"
                 )
 
             messages.append({"role": "assistant", "content": answer})

@@ -6,10 +6,13 @@ An ad-hoc question assistant is technically feasible as a Streamlit sidebar,
 but it should remain an optional preview rather than part of the assessed core
 path. The dashboard must remain useful when the model endpoint is unavailable.
 
-The selected implementation uses the `gpt-5.4-mini` model deployment through
-the Microsoft Foundry project Responses API. Agent instructions and local
-function tools run inside the Render application as an ephemeral agent. The
-requirement is grounded question answering, not autonomous multi-step action.
+The selected implementation invokes prompt agent `agent-req` version 3 through
+its agent-scoped Microsoft Foundry Responses endpoint. The prompt agent uses the
+`gpt-5.4-mini` deployment. Its allowlisted function definitions are persisted
+in the Foundry agent version, while the functions themselves run inside the
+Render application. Foundry agent endpoints reject function definitions passed
+dynamically in an individual response request. The requirement is grounded
+question answering, not autonomous multi-step action.
 
 ## Recommended architecture
 
@@ -20,7 +23,7 @@ Dashboard user
 Streamlit sidebar chat
     |
     v
-Microsoft Foundry model / prompt agent
+Microsoft Foundry prompt agent
     |
     | requests an allowlisted function
     v
@@ -41,9 +44,13 @@ execute arbitrary SQL. Microsoft documents that function calling returns a tool
 request for the application to execute; the model does not execute the
 function itself.
 
-## Initial allowlisted tools
+## Allowlisted tools
 
-### `get_market_summary`
+### `get_available_date_range`
+
+Returns the complete curated date range and available metrics.
+
+### `get_market_snapshot`
 
 Inputs:
 
@@ -80,6 +87,26 @@ Returns deterministic summary statistics calculated by application code.
 ### `get_data_freshness`
 
 Returns the latest market, macro, curated, pipeline-run, and quality status.
+
+### `get_extreme_observations`
+
+Returns up to ten highest or lowest observations for an allowlisted metric
+within a validated date range.
+
+## Agent version deployment
+
+Generate the versioned agent definition from the same instructions and schemas
+used by the application:
+
+```powershell
+$env:PYTHONPATH = "src"
+python scripts/generate_foundry_agent_payload.py > foundry-agent.json
+```
+
+Create a new `agent-req` version through the Foundry project REST API. Do not
+include a `tools` property in subsequent calls to the deployed agent endpoint;
+the endpoint resolves the latest saved agent version and returns function-call
+items for the application to execute.
 
 ## Answering guardrails
 
