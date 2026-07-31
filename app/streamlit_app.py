@@ -243,34 +243,38 @@ st.markdown(
         text-transform: uppercase;
         margin-bottom: 0.35rem;
     }
-    .product-title {
-        color: #16324F;
-        font-size: 1.55rem;
-        font-weight: 780;
-        letter-spacing: -0.02em;
-        margin: 0;
-    }
-    .product-subtitle {
-        color: #667085;
-        font-size: 0.82rem;
-        margin-top: 0.1rem;
-    }
-    .hero {
+    .st-key-market-pulse-hero {
         background: linear-gradient(120deg, #16324F 0%, #1E4969 70%, #147D92 140%);
         border-radius: 18px;
-        color: white;
-        padding: 1.6rem 1.8rem;
+        padding: 1.35rem 1.8rem 1.15rem;
         margin-bottom: 1rem;
         box-shadow: 0 12px 30px rgba(22, 50, 79, 0.16);
     }
-    .hero h1 {
+    .st-key-market-pulse-hero h1 {
         color: white;
         font-size: 2rem;
         line-height: 1.15;
         margin: 0 0 0.4rem;
         letter-spacing: -0.025em;
     }
-    .hero p {color: #DCE8F1; margin: 0; font-size: 0.98rem;}
+    .st-key-market-pulse-hero .pulse-subtitle {
+        color: #DCE8F1;
+        margin: 0;
+        font-size: 0.98rem;
+    }
+    .st-key-market-pulse-hero [data-testid="stDateInput"] label p {
+        color: white !important;
+        font-size: 1rem !important;
+        font-weight: 800 !important;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .st-key-market-pulse-hero [data-testid="stDateInput"] input {
+        color: #16324F;
+        font-size: 1.05rem;
+        font-weight: 750;
+        min-height: 2.8rem;
+    }
     div[data-testid="stMetric"] {
         background: white;
         border: 1px solid #E1E8EF;
@@ -348,28 +352,24 @@ except Exception:
     st.stop()
 
 logo_path = Path(__file__).resolve().parent / "assets" / "niftydata-logo.png"
-logo_column, title_column, date_column = st.columns(
-    [0.32, 0.40, 0.28],
-    vertical_alignment="center",
-)
+logo_left, logo_column, logo_right = st.columns([0.3, 0.4, 0.3])
 with logo_column:
-    st.image(str(logo_path), width=280)
-with title_column:
-    st.markdown(
-        (
-            '<div class="product-title">Market Intelligence</div>'
-            '<div class="product-subtitle">Australian market and macro monitoring</div>'
-        ),
-        unsafe_allow_html=True,
+    st.image(str(logo_path), use_container_width=True)
+
+with st.container(key="market-pulse-hero"):
+    pulse_column, date_column = st.columns(
+        [0.68, 0.32],
+        vertical_alignment="center",
     )
-with date_column:
-    selected_end_date = st.date_input(
-        "Analysis ending",
-        value=metadata.latest_curated_date,
-        min_value=metadata.first_curated_date,
-        max_value=metadata.latest_curated_date,
-        help="Select the end date for the trailing 90-calendar-day analysis.",
-    )
+    with date_column:
+        selected_end_date = st.date_input(
+            "Analysis Ending",
+            value=metadata.latest_curated_date,
+            min_value=metadata.first_curated_date,
+            max_value=metadata.latest_curated_date,
+            format="DD/MM/YYYY",
+            help="Select the end date for the trailing 90-calendar-day analysis.",
+        )
 
 try:
     data = dashboard_frame(selected_end_date)
@@ -388,16 +388,15 @@ calculated_at = pd.Timestamp(metadata.latest_calculated_at).tz_convert(
     SYDNEY_TIMEZONE
 )
 
-st.markdown(
-    f"""
-    <div class="hero">
+with pulse_column:
+    st.markdown(
+        f"""
         <h1>Australian Market Pulse</h1>
-        <p>S&amp;P/ASX 200 activity, volatility and monetary context — 90 days
-        ending {effective_end_date:%d %B %Y}</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        <p class="pulse-subtitle">S&amp;P/ASX 200 activity, volatility and
+        monetary context — 90 days ending {effective_end_date:%d/%m/%Y}</p>
+        """,
+        unsafe_allow_html=True,
+    )
 st.markdown(
     (
         '<div class="freshness">'
