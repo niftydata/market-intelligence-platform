@@ -439,7 +439,8 @@ def pipeline_run_result(engine: Engine, pipeline_run_id: int) -> dict[str, Any]:
                     records_rejected,
                     started_at,
                     finished_at,
-                    error_type
+                    error_type,
+                    error_message
                 FROM control.pipeline_run
                 WHERE pipeline_run_id = :pipeline_run_id
                 """

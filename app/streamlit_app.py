@@ -292,6 +292,14 @@ def data_refresh_control() -> None:
                     }
                     for stage in refresh_result.stages
                 ],
+                "failure_summary": next(
+                    (
+                        stage.failure_summary
+                        for stage in refresh_result.stages
+                        if stage.status == "failed" and stage.failure_summary
+                    ),
+                    None,
+                ),
             }
             dashboard_metadata.clear()
             dashboard_frame.clear()
@@ -326,6 +334,8 @@ def data_refresh_control() -> None:
                 "dashboard remains available. "
                 f"Reference: {refresh_summary['reference_id']}"
             )
+            if refresh_summary.get("failure_summary"):
+                st.error(refresh_summary["failure_summary"])
         st.dataframe(
             pd.DataFrame(refresh_summary["rows"]),
             hide_index=True,
@@ -340,8 +350,8 @@ def ai_assistant_sidebar(analysis_end_date: date) -> None:
     max_attempts = max(1, int(os.getenv("AI_MAX_LOGIN_ATTEMPTS", "5")))
 
     with st.sidebar:
-        st.markdown("## Ask AI")
-        st.caption("Ask questions about the market and macro data.")
+        st.markdown("## AI + Refresh")
+        st.caption("Refresh the data or ask questions about markets and macro.")
 
         if not enabled:
             st.info("The AI assistant is not enabled.")

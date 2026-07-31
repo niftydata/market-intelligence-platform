@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -37,6 +38,7 @@ LOGGER = logging.getLogger(__name__)
 PIPELINE_NAME = "yahoo_market_index_daily"
 RBA_PIPELINE_NAME = "rba_interbank_cash_rate_daily"
 CURATED_PIPELINE_NAME = "curated_market_intelligence_daily"
+MAX_FAILURE_SUMMARY_LENGTH = 250
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,7 @@ class RefreshStageResult:
     records_accepted: int
     records_rejected: int
     pipeline_run_id: int | None
+    failure_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -421,6 +424,10 @@ def run_full_refresh(settings: Settings, *, as_of_date: date) -> FullRefreshResu
                         records_accepted=0,
                         records_rejected=0,
                         pipeline_run_id=None,
+                        failure_summary=(
+                            "Curated analytics was skipped because a source "
+                            "refresh failed."
+                        ),
                     )
                 )
     finally:
@@ -449,6 +456,9 @@ def _execute_refresh_stage(
             records_accepted=0,
             records_rejected=0,
             pipeline_run_id=None,
+            failure_summary=(
+                f"{stage_name} failed before a pipeline run could be created."
+            ),
         )
     return _refresh_stage_from_run(
         stage_name,
@@ -467,4 +477,40 @@ def _refresh_stage_from_run(
         records_accepted=int(run["records_accepted"]),
         records_rejected=int(run["records_rejected"]),
         pipeline_run_id=int(run["pipeline_run_id"]),
+        failure_summary=_safe_failure_summary(stage_name, run),
     )
+
+
+def _safe_failure_summary(
+    stage_name: str,
+    run: dict[str, Any],
+) -> str | None:
+    if run["status"] != "failed":
+        return None
+
+    raw_detail = str(
+        run.get("error_message")
+        or run.get("error_type")
+        or "the refresh encountered an unexpected error"
+    )
+    detail = re.sub(
+        r"(?i)\b(?:postgres(?:ql)?(?:\+\w+)?://)\S+",
+        "[database connection redacted]",
+        raw_detail,
+    )
+    detail = re.sub(r"(?i)\bhttps?://\S+", "[upstream endpoint]", detail)
+    detail = re.sub(
+        r"(?i)\b(password|token|secret)\s*[=:]\s*[^\s,;.!?]+",
+        r"\1=[redacted]",
+        detail,
+    )
+    detail = re.sub(r"\s+", " ", detail).strip()
+    detail = re.split(r"(?<=[.!?])\s+", detail, maxsplit=1)[0]
+    detail = detail.rstrip(".!?")
+
+    summary = f"{stage_name} failed: {detail}"
+    if len(summary) >= MAX_FAILURE_SUMMARY_LENGTH:
+        summary = summary[: MAX_FAILURE_SUMMARY_LENGTH - 3].rstrip() + "..."
+    else:
+        summary += "."
+    return summary

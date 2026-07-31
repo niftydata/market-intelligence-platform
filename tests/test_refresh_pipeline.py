@@ -124,3 +124,23 @@ def test_full_refresh_reports_source_failure_and_skips_curated(
     ]
     assert not curated_called
     assert engine.disposed
+
+
+def test_failure_summary_is_safe_single_sentence_and_capped() -> None:
+    run = _run(31, status="failed")
+    run["error_message"] = (
+        "Request failed at https://example.test/private with "
+        "password=super-secret and "
+        + ("additional diagnostic context " * 20)
+        + ". This second sentence must not be shown."
+    )
+
+    summary = pipeline._safe_failure_summary("RBA cash rate", run)
+
+    assert summary is not None
+    assert len(summary) <= pipeline.MAX_FAILURE_SUMMARY_LENGTH
+    assert "https://" not in summary
+    assert "super-secret" not in summary
+    assert "second sentence" not in summary
+    assert len(summary) == pipeline.MAX_FAILURE_SUMMARY_LENGTH
+    assert summary.endswith((".", "..."))
