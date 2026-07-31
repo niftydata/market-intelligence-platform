@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from datetime import date
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -7,9 +9,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from dotenv import load_dotenv
 from plotly.subplots import make_subplots
 
 from market_intelligence.config import Settings
+from market_intelligence.dashboard.auth import verify_credentials
 from market_intelligence.dashboard.data import (
     DashboardMetadata,
     load_dashboard_frame,
@@ -27,12 +31,14 @@ RED = "#B42318"
 MUTED = "#667085"
 GRID = "#E7ECF2"
 
+load_dotenv()
+
 
 st.set_page_config(
     page_title="Australian Market Pulse | NiftyData",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 
@@ -225,6 +231,97 @@ def management_story(frame: pd.DataFrame) -> tuple[str, str]:
     return trend, macro
 
 
+def environment_flag(name: str, *, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def ai_assistant_sidebar() -> None:
+    enabled = environment_flag("ENABLE_AI_ASSISTANT")
+    configured_username = os.getenv("AI_DEMO_USERNAME", "")
+    configured_password_hash = os.getenv("AI_DEMO_PASSWORD_HASH", "")
+    max_attempts = max(1, int(os.getenv("AI_MAX_LOGIN_ATTEMPTS", "5")))
+
+    with st.sidebar:
+        st.markdown("## Ask AI")
+        st.caption("Ask questions about the market and macro data.")
+
+        if not enabled:
+            st.info("The AI assistant is not enabled.")
+            return
+
+        if not st.session_state.get("ai_panel_open", False):
+            if st.button("Ask AI", type="primary", use_container_width=True):
+                st.session_state.ai_panel_open = True
+                st.rerun()
+            return
+
+        if st.session_state.get("ai_authenticated", False):
+            st.success(f"Signed in as {configured_username}")
+            st.info(
+                "Authentication is ready. The Foundry model connection will "
+                "activate the chat in the next step."
+            )
+            if st.button("Log out", use_container_width=True):
+                st.session_state.ai_authenticated = False
+                st.session_state.ai_panel_open = False
+                st.rerun()
+            return
+
+        locked_until = float(st.session_state.get("ai_locked_until", 0.0))
+        if locked_until > time.time():
+            remaining_seconds = max(1, int(locked_until - time.time()))
+            st.error(
+                "Too many unsuccessful attempts. "
+                f"Please wait {remaining_seconds} seconds."
+            )
+            return
+
+        with st.form("ai_demo_login", clear_on_submit=True):
+            submitted_username = st.text_input(
+                "Username",
+                autocomplete="username",
+            )
+            submitted_password = st.text_input(
+                "Password",
+                type="password",
+                autocomplete="current-password",
+            )
+            submitted = st.form_submit_button(
+                "Sign in to Ask AI",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if not submitted:
+            return
+
+        if not configured_username or not configured_password_hash:
+            st.error("The AI demo login has not been configured.")
+            return
+
+        if verify_credentials(
+            submitted_username,
+            submitted_password,
+            configured_username=configured_username,
+            configured_password_hash=configured_password_hash,
+        ):
+            st.session_state.ai_authenticated = True
+            st.session_state.ai_login_attempts = 0
+            st.rerun()
+
+        attempts = int(st.session_state.get("ai_login_attempts", 0)) + 1
+        st.session_state.ai_login_attempts = attempts
+        if attempts >= max_attempts:
+            st.session_state.ai_locked_until = time.time() + 60
+            st.session_state.ai_login_attempts = 0
+            st.error("Too many unsuccessful attempts. Login is locked for 60 seconds.")
+        else:
+            st.error("Incorrect username or password.")
+
+
 st.markdown(
     """
     <style>
@@ -274,6 +371,13 @@ st.markdown(
         font-size: 1.05rem;
         font-weight: 750;
         min-height: 2.8rem;
+    }
+    section[data-testid="stSidebar"] {
+        border-right: 1px solid #DDE5EC;
+    }
+    section[data-testid="stSidebar"] h2 {
+        color: #16324F;
+        letter-spacing: -0.02em;
     }
     div[data-testid="stMetric"] {
         background: white;
@@ -342,6 +446,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+ai_assistant_sidebar()
+
 try:
     metadata = dashboard_metadata()
 except Exception:
@@ -352,7 +458,7 @@ except Exception:
     st.stop()
 
 logo_path = Path(__file__).resolve().parent / "assets" / "niftydata-logo.png"
-logo_left, logo_column, logo_right = st.columns([0.3, 0.4, 0.3])
+logo_left, logo_column, logo_right = st.columns([0.325, 0.35, 0.325])
 with logo_column:
     st.image(str(logo_path), use_container_width=True)
 

@@ -21,3 +21,11 @@ services:
         sync: false
       - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: "false"
+      - key: ENABLE_AI_ASSISTANT
+        value: "true"
+      - key: AI_DEMO_USERNAME
+        value: macquarie
+      - key: AI_DEMO_PASSWORD_HASH
+        sync: false
+      - key: AI_MAX_LOGIN_ATTEMPTS
+        value: "5"

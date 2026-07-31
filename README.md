@@ -189,10 +189,16 @@ metrics.
 check and the custom domain
 `market-intelligence.niftydata.com.au`.
 
-The Render web service requires one secret environment variable:
+The Render web service requires these secret environment variables:
 
 - `DATABASE_URL`: use the Render PostgreSQL **internal** database URL when the
   web service and database are both in Singapore.
+- `AI_DEMO_PASSWORD_HASH`: PBKDF2 hash for the password protecting the optional
+  Ask AI panel. Never store the plaintext password in source control.
+
+The non-secret AI demo settings are defined in `render.yaml`. The dashboard
+remains public; only the Ask AI panel requires authentication. Five failed
+sign-in attempts lock that browser session for 60 seconds.
 
 The dashboard is read-only and queries only curated and operational metadata.
 It does not perform ingestion or transformation work in a web request.
