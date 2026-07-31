@@ -6,9 +6,10 @@ An ad-hoc question assistant is technically feasible as a Streamlit sidebar,
 but it should remain an optional preview rather than part of the assessed core
 path. The dashboard must remain useful when the model endpoint is unavailable.
 
-For this scope, prefer a Microsoft Foundry model or prompt agent with function
-calling over a hosted autonomous agent. The requirement is grounded question
-answering, not autonomous multi-step action.
+The selected implementation uses the `gpt-5.4-mini` model deployment through
+the Microsoft Foundry project Responses API. Agent instructions and local
+function tools run inside the Render application as an ephemeral agent. The
+requirement is grounded question answering, not autonomous multi-step action.
 
 ## Recommended architecture
 
@@ -64,7 +65,9 @@ Inputs:
 - one metric from an enumerated list;
 - start and end dates constrained to the curated range.
 
-Returns at most 90 validated daily observations.
+Returns at most 270 validated daily observations spanning no more than 366
+calendar days. Longer historical questions use deterministic period-comparison
+or extreme-observation tools.
 
 ### `compare_periods`
 

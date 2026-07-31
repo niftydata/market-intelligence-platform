@@ -9,6 +9,8 @@ description = "Production-inspired market intelligence data platform."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
+    "agent-framework-foundry>=1.10,<2.0",
+    "azure-identity>=1.25,<2.0",
     "pandas>=2.2,<3.0",
     "psycopg[binary]>=3.2,<4.0",
     "python-dotenv>=1.0,<2.0",

@@ -12,6 +12,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from plotly.subplots import make_subplots
 
+from market_intelligence.assistant.foundry import FoundryAssistant, FoundrySettings
 from market_intelligence.config import Settings
 from market_intelligence.dashboard.auth import verify_credentials
 from market_intelligence.dashboard.data import (
@@ -59,6 +60,14 @@ def dashboard_frame(analysis_end_date: date) -> pd.DataFrame:
         database_engine(),
         analysis_end_date=analysis_end_date,
         window_days=90,
+    )
+
+
+@st.cache_resource
+def foundry_assistant() -> FoundryAssistant:
+    return FoundryAssistant.create(
+        database_engine(),
+        FoundrySettings.from_environment(),
     )
 
 
@@ -238,7 +247,7 @@ def environment_flag(name: str, *, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def ai_assistant_sidebar() -> None:
+def ai_assistant_sidebar(analysis_end_date: date) -> None:
     enabled = environment_flag("ENABLE_AI_ASSISTANT")
     configured_username = os.getenv("AI_DEMO_USERNAME", "")
     configured_password_hash = os.getenv("AI_DEMO_PASSWORD_HASH", "")
@@ -260,14 +269,82 @@ def ai_assistant_sidebar() -> None:
 
         if st.session_state.get("ai_authenticated", False):
             st.success(f"Signed in as {configured_username}")
-            st.info(
-                "Authentication is ready. The Foundry model connection will "
-                "activate the chat in the next step."
-            )
-            if st.button("Log out", use_container_width=True):
+            action_columns = st.columns(2)
+            if action_columns[0].button("Clear", use_container_width=True):
+                st.session_state.ai_messages = []
+                st.session_state.ai_question_count = 0
+                st.rerun()
+            if action_columns[1].button("Log out", use_container_width=True):
                 st.session_state.ai_authenticated = False
                 st.session_state.ai_panel_open = False
+                st.session_state.ai_messages = []
                 st.rerun()
+
+            try:
+                FoundrySettings.from_environment()
+            except ValueError:
+                st.info(
+                    "Login is ready. Add the Foundry client secret in Render "
+                    "to activate questions."
+                )
+                return
+
+            messages = st.session_state.setdefault("ai_messages", [])
+            if not messages:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "Ask me about ASX 200 performance, volatility, "
+                            "RBA rates, historical comparisons, or the current signal."
+                        ),
+                    }
+                )
+            for message in messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+            max_questions = max(
+                1,
+                int(os.getenv("AI_MAX_QUESTIONS_PER_SESSION", "20")),
+            )
+            question_count = int(st.session_state.get("ai_question_count", 0))
+            if question_count >= max_questions:
+                st.warning(
+                    "This demo session has reached its question limit. "
+                    "Clear the conversation to start again."
+                )
+                return
+
+            prompt = st.chat_input(
+                "Ask about the market data",
+                max_chars=500,
+            )
+            if not prompt:
+                return
+
+            prior_conversation = list(messages)
+            messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            try:
+                with st.spinner("Analysing the validated data..."):
+                    answer = foundry_assistant().answer(
+                        prompt,
+                        analysis_end_date=analysis_end_date,
+                        conversation=prior_conversation,
+                    )
+            except Exception:
+                answer = (
+                    "The AI assistant is temporarily unavailable. "
+                    "The dashboard data has not been affected."
+                )
+
+            messages.append({"role": "assistant", "content": answer})
+            st.session_state.ai_question_count = question_count + 1
+            with st.chat_message("assistant"):
+                st.markdown(answer)
             return
 
         locked_until = float(st.session_state.get("ai_locked_until", 0.0))
@@ -446,8 +523,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ai_assistant_sidebar()
-
 try:
     metadata = dashboard_metadata()
 except Exception:
@@ -493,6 +568,8 @@ trend_story, macro_story = management_story(data)
 calculated_at = pd.Timestamp(metadata.latest_calculated_at).tz_convert(
     SYDNEY_TIMEZONE
 )
+
+ai_assistant_sidebar(effective_end_date)
 
 with pulse_column:
     st.markdown(

@@ -27,11 +27,19 @@ def test_dashboard_renders_without_runtime_exceptions(
     monkeypatch.setenv(
         "AI_DEMO_PASSWORD_HASH",
         create_password_hash(
-            "holeydollar",
+            "test-password",
             salt=b"0123456789abcdef",
             iterations=1_000,
         ),
     )
+    monkeypatch.setenv(
+        "FOUNDRY_PROJECT_ENDPOINT",
+        "https://example.services.ai.azure.com/api/projects/example",
+    )
+    monkeypatch.setenv("FOUNDRY_MODEL", "test-model")
+    monkeypatch.setenv("AZURE_TENANT_ID", "test-tenant")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "test-client")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "test-secret")
     app_path = Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py"
 
     app = AppTest.from_file(str(app_path), default_timeout=15).run()
@@ -41,11 +49,12 @@ def test_dashboard_renders_without_runtime_exceptions(
 
     app.button[0].click().run()
     app.text_input[0].set_value("macquarie")
-    app.text_input[1].set_value("holeydollar")
+    app.text_input[1].set_value("test-password")
     app.button[0].click().run()
 
     assert not app.exception
     assert app.success[0].value == "Signed in as macquarie"
+    assert len(app.chat_input) == 1
     assert len(app.date_input) == 1
 
     app.date_input[0].set_value(date(2026, 6, 28)).run()

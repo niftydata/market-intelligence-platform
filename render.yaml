@@ -29,3 +29,15 @@ services:
         sync: false
       - key: AI_MAX_LOGIN_ATTEMPTS
         value: "5"
+      - key: AI_MAX_QUESTIONS_PER_SESSION
+        value: "20"
+      - key: FOUNDRY_PROJECT_ENDPOINT
+        value: https://trs-aus1-fy-02.services.ai.azure.com/api/projects/proj-default
+      - key: FOUNDRY_MODEL
+        value: gpt-5.4-mini
+      - key: AZURE_TENANT_ID
+        value: c0d27802-b957-4931-a27b-b20fac443b90
+      - key: AZURE_CLIENT_ID
+        value: 48a1cae9-a981-4dfe-a032-d9950726cab4
+      - key: AZURE_CLIENT_SECRET
+        sync: false
