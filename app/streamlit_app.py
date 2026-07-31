@@ -508,8 +508,20 @@ st.markdown(
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&display=swap');
 
     #MainMenu, footer, header {visibility: hidden;}
-    html, body, [class*="st-"], .stApp, button, input, textarea, select {
+    html, body, .stApp, input, textarea, select {
         font-family: "Noto Sans", Arial, sans-serif !important;
+    }
+    [data-testid="stIconMaterial"],
+    .material-symbols-rounded,
+    .material-symbols-outlined {
+        font-family: "Material Symbols Rounded", "Material Symbols Outlined"
+            !important;
+        font-style: normal !important;
+        font-weight: normal !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        white-space: nowrap !important;
+        word-wrap: normal !important;
     }
     .stApp {
         background: #F5F5F3;
