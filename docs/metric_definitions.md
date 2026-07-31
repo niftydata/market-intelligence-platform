@@ -61,8 +61,10 @@ returns are available.
 
 ## Market Stress RAG signal
 
-The RAG signal uses the distribution of all valid 14-day annualised volatility
-observations within the rolling five-year curated window:
+For each trading date, the RAG signal uses only valid 14-day annualised
+volatility observations available on or before that date, within the preceding
+five years. This makes historical signals point-in-time correct when the
+dashboard analysis date changes.
 
 - Green: volatility is below the 75th percentile.
 - Amber: volatility is at or above the 75th percentile and below the 90th
@@ -70,12 +72,14 @@ observations within the rolling five-year curated window:
 - Red: volatility is at or above the 90th percentile.
 - Insufficient data: the volatility or thresholds cannot yet be calculated.
 
-The thresholds are recalculated when the curated dataset refreshes. They are
-descriptive monitoring thresholds, not predictive trading signals or formal
-risk limits.
+At least 60 valid volatility observations are required before a signal is
+assigned. The thresholds are recalculated when the curated dataset refreshes.
+They are descriptive monitoring thresholds, not predictive trading signals or
+formal risk limits.
 
 ## Dashboard window
 
 The curated table retains the five-year calculation history. The management
-dashboard displays the latest 90 calendar days, ensuring rolling metrics are
-already fully populated at the start of the visible period.
+dashboard displays the 90 calendar days ending on a user-selected date. The
+selected date resolves to the latest available trading date on or before it, so
+weekends and market holidays do not create empty views.

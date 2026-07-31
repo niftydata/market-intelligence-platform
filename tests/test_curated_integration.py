@@ -3,9 +3,12 @@ from __future__ import annotations
 import math
 import os
 import statistics
+from datetime import date
 
 import pytest
 from sqlalchemy import create_engine, text
+
+from market_intelligence.dashboard.data import load_dashboard_frame
 
 INTEGRATION_DATABASE_URL = os.getenv("INTEGRATION_DATABASE_URL")
 
@@ -75,3 +78,20 @@ def test_latest_curated_metrics_match_independent_calculation() -> None:
         abs=1e-5,
     )
     assert latest.rba_observation_date <= latest.trading_date
+
+
+def test_dashboard_window_ends_on_or_before_selected_date() -> None:
+    engine = create_engine(INTEGRATION_DATABASE_URL, pool_pre_ping=True)
+    try:
+        frame = load_dashboard_frame(
+            engine,
+            analysis_end_date=date(2026, 6, 28),
+            window_days=90,
+        )
+    finally:
+        engine.dispose()
+
+    assert frame["trading_date"].max().date() <= date(2026, 6, 28)
+    assert (
+        frame["trading_date"].max() - frame["trading_date"].min()
+    ).days <= 90

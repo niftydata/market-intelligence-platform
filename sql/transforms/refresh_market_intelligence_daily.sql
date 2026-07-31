@@ -65,17 +65,6 @@ volatility_metrics AS (
         END AS realized_volatility_14d_percent
     FROM return_metrics
 ),
-thresholds AS (
-    SELECT
-        percentile_cont(0.75) WITHIN GROUP (
-            ORDER BY realized_volatility_14d_percent
-        ) AS volatility_p75_threshold,
-        percentile_cont(0.90) WITHIN GROUP (
-            ORDER BY realized_volatility_14d_percent
-        ) AS volatility_p90_threshold
-    FROM volatility_metrics
-    WHERE realized_volatility_14d_percent IS NOT NULL
-),
 aligned AS (
     SELECT
         market.*,
@@ -95,6 +84,30 @@ aligned AS (
         ORDER BY rba.observation_date DESC
         LIMIT 1
     ) AS macro ON true
+),
+thresholded AS (
+    SELECT
+        aligned.*,
+        thresholds.baseline_observation_count,
+        thresholds.volatility_p75_threshold,
+        thresholds.volatility_p90_threshold
+    FROM aligned
+    LEFT JOIN LATERAL (
+        SELECT
+            count(*) AS baseline_observation_count,
+            percentile_cont(0.75) WITHIN GROUP (
+                ORDER BY baseline.realized_volatility_14d_percent
+            ) AS volatility_p75_threshold,
+            percentile_cont(0.90) WITHIN GROUP (
+                ORDER BY baseline.realized_volatility_14d_percent
+            ) AS volatility_p90_threshold
+        FROM volatility_metrics AS baseline
+        WHERE baseline.instrument_code = aligned.instrument_code
+            AND baseline.trading_date <= aligned.trading_date
+            AND baseline.trading_date >=
+                aligned.trading_date - INTERVAL '5 years'
+            AND baseline.realized_volatility_14d_percent IS NOT NULL
+    ) AS thresholds ON true
 )
 INSERT INTO curated.market_intelligence_daily (
     trading_date,
@@ -116,38 +129,38 @@ INSERT INTO curated.market_intelligence_daily (
     pipeline_run_id
 )
 SELECT
-    aligned.trading_date,
-    aligned.instrument_code,
-    aligned.close_value,
-    aligned.rolling_average_20d,
-    aligned.return_20d_percent,
-    aligned.realized_volatility_14d_percent,
-    aligned.rba_series_code,
-    aligned.rba_observation_date,
-    aligned.rba_cash_rate_percent,
+    thresholded.trading_date,
+    thresholded.instrument_code,
+    thresholded.close_value,
+    thresholded.rolling_average_20d,
+    thresholded.return_20d_percent,
+    thresholded.realized_volatility_14d_percent,
+    thresholded.rba_series_code,
+    thresholded.rba_observation_date,
+    thresholded.rba_cash_rate_percent,
     CASE
-        WHEN aligned.rba_observation_date IS NOT NULL
-        THEN aligned.trading_date - aligned.rba_observation_date
+        WHEN thresholded.rba_observation_date IS NOT NULL
+        THEN thresholded.trading_date - thresholded.rba_observation_date
     END AS rba_observation_age_days,
-    thresholds.volatility_p75_threshold,
-    thresholds.volatility_p90_threshold,
+    thresholded.volatility_p75_threshold,
+    thresholded.volatility_p90_threshold,
     CASE
-        WHEN aligned.realized_volatility_14d_percent IS NULL
-            OR thresholds.volatility_p75_threshold IS NULL
-            OR thresholds.volatility_p90_threshold IS NULL
+        WHEN thresholded.realized_volatility_14d_percent IS NULL
+            OR thresholded.baseline_observation_count < 60
+            OR thresholded.volatility_p75_threshold IS NULL
+            OR thresholded.volatility_p90_threshold IS NULL
         THEN 'insufficient_data'
-        WHEN aligned.realized_volatility_14d_percent
-            >= thresholds.volatility_p90_threshold
+        WHEN thresholded.realized_volatility_14d_percent
+            >= thresholded.volatility_p90_threshold
         THEN 'red'
-        WHEN aligned.realized_volatility_14d_percent
-            >= thresholds.volatility_p75_threshold
+        WHEN thresholded.realized_volatility_14d_percent
+            >= thresholded.volatility_p75_threshold
         THEN 'amber'
         ELSE 'green'
     END AS rag_status,
-    aligned.source_market_loaded_at,
-    aligned.source_rba_loaded_at,
+    thresholded.source_market_loaded_at,
+    thresholded.source_rba_loaded_at,
     now(),
     :pipeline_run_id
-FROM aligned
-CROSS JOIN thresholds
-ORDER BY aligned.trading_date;
+FROM thresholded
+ORDER BY thresholded.trading_date;

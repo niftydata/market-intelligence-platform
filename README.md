@@ -150,8 +150,16 @@ and the latest 90 days contain complete calculated metrics. Definitions and
 assumptions are documented in
 [`docs/metric_definitions.md`](docs/metric_definitions.md).
 
+The dashboard includes an analysis end-date selector. It resolves weekends and
+market holidays to the most recent available trading date and displays the
+trailing 90 calendar days. Historical RAG thresholds use only observations
+available on or before the selected date, avoiding look-ahead bias.
+
 AI-assisted development decisions and corrections are recorded in
 [`docs/ai-agent-log.md`](docs/ai-agent-log.md).
+
+The optional, tool-grounded Microsoft Foundry assistant design is documented in
+[`docs/ai-assistant-design.md`](docs/ai-assistant-design.md).
 
 ## Tests
 

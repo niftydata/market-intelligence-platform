@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,12 @@ def test_dashboard_renders_without_runtime_exceptions(
     app_path = Path(__file__).resolve().parents[1] / "app" / "streamlit_app.py"
 
     app = AppTest.from_file(str(app_path), default_timeout=15).run()
+
+    assert not app.exception
+    assert len(app.metric) == 4
+    assert len(app.date_input) == 1
+
+    app.date_input[0].set_value(date(2026, 6, 28)).run()
 
     assert not app.exception
     assert len(app.metric) == 4

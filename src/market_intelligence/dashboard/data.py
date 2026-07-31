@@ -10,6 +10,7 @@ from sqlalchemy import Engine, text
 
 @dataclass(frozen=True)
 class DashboardMetadata:
+    first_curated_date: date
     latest_market_date: date
     latest_rba_date: date
     latest_curated_date: date
@@ -18,12 +19,18 @@ class DashboardMetadata:
     latest_curated_run_finished_at: datetime | None
 
 
-def load_dashboard_frame(engine: Engine, *, window_days: int = 90) -> pd.DataFrame:
+def load_dashboard_frame(
+    engine: Engine,
+    *,
+    analysis_end_date: date,
+    window_days: int = 90,
+) -> pd.DataFrame:
     query = text(
         """
-        WITH latest AS (
-            SELECT max(trading_date) AS latest_date
+        WITH effective_end AS (
+            SELECT max(trading_date) AS end_date
             FROM curated.market_intelligence_daily
+            WHERE trading_date <= :analysis_end_date
         )
         SELECT
             curated.trading_date,
@@ -38,16 +45,20 @@ def load_dashboard_frame(engine: Engine, *, window_days: int = 90) -> pd.DataFra
             curated.volatility_p90_threshold,
             curated.rag_status
         FROM curated.market_intelligence_daily AS curated
-        CROSS JOIN latest
+        CROSS JOIN effective_end
         WHERE curated.trading_date >=
-            latest.latest_date - (:window_days * INTERVAL '1 day')
+            effective_end.end_date - (:window_days * INTERVAL '1 day')
+            AND curated.trading_date <= effective_end.end_date
         ORDER BY curated.trading_date
         """
     )
     frame = pd.read_sql_query(
         query,
         engine,
-        params={"window_days": window_days},
+        params={
+            "analysis_end_date": analysis_end_date,
+            "window_days": window_days,
+        },
         parse_dates=["trading_date", "rba_observation_date"],
     )
     if frame.empty:
@@ -73,6 +84,9 @@ def load_dashboard_metadata(engine: Engine) -> DashboardMetadata:
     query = text(
         """
         SELECT
+            (SELECT min(trading_date)
+                FROM curated.market_intelligence_daily)
+                AS first_curated_date,
             (SELECT max(trading_date) FROM raw.market_index_daily)
                 AS latest_market_date,
             (SELECT max(observation_date) FROM raw.rba_cash_rate_daily)
@@ -104,6 +118,7 @@ def load_dashboard_metadata(engine: Engine) -> DashboardMetadata:
             "latest_rba_date",
             "latest_curated_date",
             "latest_calculated_at",
+            "first_curated_date",
         )
     ):
         raise RuntimeError("Dashboard freshness metadata is incomplete")

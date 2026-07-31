@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -41,9 +43,17 @@ def database_engine():
 
 
 @st.cache_data(ttl=300)
-def dashboard_data() -> tuple[pd.DataFrame, DashboardMetadata]:
-    engine = database_engine()
-    return load_dashboard_frame(engine, window_days=90), load_dashboard_metadata(engine)
+def dashboard_metadata() -> DashboardMetadata:
+    return load_dashboard_metadata(database_engine())
+
+
+@st.cache_data(ttl=300)
+def dashboard_frame(analysis_end_date: date) -> pd.DataFrame:
+    return load_dashboard_frame(
+        database_engine(),
+        analysis_end_date=analysis_end_date,
+        window_days=90,
+    )
 
 
 def format_percent(value: float, *, decimals: int = 1) -> str:
@@ -233,6 +243,18 @@ st.markdown(
         text-transform: uppercase;
         margin-bottom: 0.35rem;
     }
+    .product-title {
+        color: #16324F;
+        font-size: 1.55rem;
+        font-weight: 780;
+        letter-spacing: -0.02em;
+        margin: 0;
+    }
+    .product-subtitle {
+        color: #667085;
+        font-size: 0.82rem;
+        margin-top: 0.1rem;
+    }
     .hero {
         background: linear-gradient(120deg, #16324F 0%, #1E4969 70%, #147D92 140%);
         border-radius: 18px;
@@ -317,7 +339,7 @@ st.markdown(
 )
 
 try:
-    data, metadata = dashboard_data()
+    metadata = dashboard_metadata()
 except Exception:
     st.error(
         "Market data is temporarily unavailable. The latest validated dataset "
@@ -325,19 +347,53 @@ except Exception:
     )
     st.stop()
 
+logo_path = Path(__file__).resolve().parent / "assets" / "niftydata-logo.png"
+logo_column, title_column, date_column = st.columns(
+    [0.32, 0.40, 0.28],
+    vertical_alignment="center",
+)
+with logo_column:
+    st.image(str(logo_path), width=280)
+with title_column:
+    st.markdown(
+        (
+            '<div class="product-title">Market Intelligence</div>'
+            '<div class="product-subtitle">Australian market and macro monitoring</div>'
+        ),
+        unsafe_allow_html=True,
+    )
+with date_column:
+    selected_end_date = st.date_input(
+        "Analysis ending",
+        value=metadata.latest_curated_date,
+        min_value=metadata.first_curated_date,
+        max_value=metadata.latest_curated_date,
+        help="Select the end date for the trailing 90-calendar-day analysis.",
+    )
+
+try:
+    data = dashboard_frame(selected_end_date)
+except Exception:
+    st.error(
+        "No validated market observations are available on or before the "
+        "selected analysis date."
+    )
+    st.stop()
+
 latest = data.iloc[-1]
+effective_end_date = pd.Timestamp(latest["trading_date"]).date()
 signal_label, signal_title, signal_color = signal_content(str(latest["rag_status"]))
 trend_story, macro_story = management_story(data)
 calculated_at = pd.Timestamp(metadata.latest_calculated_at).tz_convert(
     SYDNEY_TIMEZONE
 )
 
-st.markdown('<div class="brand">NiftyData · Market Intelligence</div>', unsafe_allow_html=True)
 st.markdown(
-    """
+    f"""
     <div class="hero">
         <h1>Australian Market Pulse</h1>
-        <p>S&amp;P/ASX 200 activity, volatility and monetary context — latest 90 days</p>
+        <p>S&amp;P/ASX 200 activity, volatility and monetary context — 90 days
+        ending {effective_end_date:%d %B %Y}</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -345,7 +401,8 @@ st.markdown(
 st.markdown(
     (
         '<div class="freshness">'
-        f"Market data through {metadata.latest_curated_date:%d %b %Y} · "
+        f"Analysis through {effective_end_date:%d %b %Y} · "
+        f"Latest market source {metadata.latest_market_date:%d %b %Y} · "
         f"RBA source through {metadata.latest_rba_date:%d %b %Y} · "
         f"Refreshed {calculated_at:%d %b %Y, %H:%M} AEST/AEDT"
         "</div>"
