@@ -36,7 +36,7 @@ services:
       - key: FOUNDRY_AGENT_NAME
         value: agent-req
       - key: FOUNDRY_AGENT_VERSION
-        value: "3"
+        value: "4"
       - key: FOUNDRY_AGENT_API_VERSION
         value: v1
       - key: AZURE_TENANT_ID

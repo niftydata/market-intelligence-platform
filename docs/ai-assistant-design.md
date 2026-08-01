@@ -6,7 +6,7 @@ An ad-hoc question assistant is technically feasible as a Streamlit sidebar,
 but it should remain an optional preview rather than part of the assessed core
 path. The dashboard must remain useful when the model endpoint is unavailable.
 
-The selected implementation invokes prompt agent `agent-req` version 3 through
+The selected implementation invokes prompt agent `agent-req` version 4 through
 its agent-scoped Microsoft Foundry Responses endpoint. The prompt agent uses the
 `gpt-5.4-mini` deployment. Its allowlisted function definitions are persisted
 in the Foundry agent version, while the functions themselves run inside the
@@ -84,6 +84,31 @@ Inputs:
 
 Returns deterministic summary statistics calculated by application code.
 
+### `analyse_market_volatility_relationship`
+
+Inputs:
+
+- start and end dates.
+
+Returns deterministic start and end closes, point and percentage change, market
+direction, and three explicitly defined Pearson correlations with 14-day
+realised volatility. This prevents the model from reversing a measured rise or
+fall and makes the meaning of "relationship" explicit.
+
+### `analyse_metric_correlation`
+
+Inputs:
+
+- any two different allowlisted curated measures;
+- start and end dates.
+
+Returns a deterministic Pearson coefficient, strength, paired-observation count,
+effective dates, endpoint changes, and methodology caveats. It supports all
+pairwise combinations of the ASX 200 close, 20-day rolling average, 20-day
+return, 14-day realised volatility, and aligned RBA cash rate. The result calls
+out forward-filled cash-rate regimes, overlapping rolling windows, and trending
+level series where relevant.
+
 ### `get_data_freshness`
 
 Returns the latest market, macro, curated, pipeline-run, and quality status.
@@ -113,6 +138,12 @@ items for the application to execute.
 The assistant instructions should require it to:
 
 - use a data tool before answering a quantitative question;
+- use deterministic direction and change fields rather than inferring movement
+  from raw endpoints;
+- use `analyse_market_volatility_relationship` for relationship questions and
+  state which correlation definition and coefficient supports the answer;
+- use `analyse_metric_correlation` for explicit correlation questions between
+  any two named curated measures and report its observation count and caveats;
 - cite the observation date and data freshness in each quantitative answer;
 - distinguish observations from interpretation;
 - avoid causal claims that the data does not establish;

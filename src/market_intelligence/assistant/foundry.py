@@ -22,6 +22,14 @@ Rules:
 - Never invent a value. If a tool has no observation, say that the data is unavailable.
 - State the effective observation date for quantitative answers.
 - Distinguish measured observations from interpretation and do not claim causation.
+- Never infer rose, fell, increased, or decreased from raw endpoints. Use the
+  deterministic direction and change fields returned by a data tool.
+- For questions about the relationship between the ASX 200 and volatility, call
+  analyse_market_volatility_relationship and name the correlation definition and
+  coefficient used. Do not describe a relationship as "mostly" positive or inverse.
+- For an explicit correlation between any two named curated measures, call
+  analyse_metric_correlation. Report its definition, coefficient, strength, paired
+  observation count, effective dates, and relevant methodology notes.
 - Do not provide investment advice, forecasts, or trade recommendations.
 - The green/amber/red status is a monitoring signal based on the point-in-time
   five-year distribution of 14-day realised volatility. It is not a formal risk limit.
@@ -106,6 +114,47 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "period_two_start",
                 "period_two_end",
             ],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "analyse_market_volatility_relationship",
+        "description": (
+            "Deterministically calculate ASX 200 direction, point and percentage "
+            "change, and three explicitly defined Pearson correlations with "
+            "14-day realised volatility for a date range. Use this for every "
+            "question about the relationship between the market and volatility."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start_date": DATE_SCHEMA,
+                "end_date": DATE_SCHEMA,
+            },
+            "required": ["start_date", "end_date"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "analyse_metric_correlation",
+        "description": (
+            "Calculate a deterministic Pearson correlation between any two "
+            "different allowlisted curated measures over a date range, with "
+            "paired-observation counts, endpoint changes, and methodology caveats."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric_one": METRIC_SCHEMA,
+                "metric_two": METRIC_SCHEMA,
+                "start_date": DATE_SCHEMA,
+                "end_date": DATE_SCHEMA,
+            },
+            "required": ["metric_one", "metric_two", "start_date", "end_date"],
             "additionalProperties": False,
         },
         "strict": True,
@@ -334,6 +383,8 @@ class FoundryAssistant:
             "get_market_snapshot",
             "get_metric_history",
             "compare_periods",
+            "analyse_market_volatility_relationship",
+            "analyse_metric_correlation",
             "get_extreme_observations",
             "get_data_freshness",
         }

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from math import log
+from statistics import StatisticsError, correlation
 from typing import Any
 
 from sqlalchemy import Engine, text
@@ -68,6 +70,79 @@ def _number(value: Any) -> float | int | None:
     if isinstance(value, (float, int)):
         return value
     return float(value)
+
+
+def _correlation_summary(
+    pairs: list[tuple[float, float]],
+    *,
+    definition: str,
+) -> dict[str, Any]:
+    coefficient: float | None = None
+    if len(pairs) >= 2:
+        try:
+            coefficient = correlation(
+                [pair[0] for pair in pairs],
+                [pair[1] for pair in pairs],
+            )
+        except StatisticsError:
+            coefficient = None
+
+    if coefficient is None:
+        direction = "unavailable"
+        strength = "unavailable"
+    else:
+        magnitude = abs(coefficient)
+        if abs(coefficient) < 1e-12:
+            direction = "neutral"
+        else:
+            direction = "positive" if coefficient > 0 else "negative"
+        if magnitude < 0.1:
+            strength = "negligible"
+        elif magnitude < 0.3:
+            strength = "weak"
+        elif magnitude < 0.5:
+            strength = "moderate"
+        elif magnitude < 0.7:
+            strength = "strong"
+        else:
+            strength = "very strong"
+
+    return {
+        "definition": definition,
+        "coefficient": round(coefficient, 4) if coefficient is not None else None,
+        "observation_count": len(pairs),
+        "direction": direction,
+        "strength": strength,
+    }
+
+
+def _metric_change_summary(
+    *,
+    metric: str,
+    label: str,
+    unit: str,
+    start_value: float,
+    end_value: float,
+    distinct_value_count: int,
+) -> dict[str, Any]:
+    change = end_value - start_value
+    if abs(change) < 1e-12:
+        direction = "unchanged"
+    elif change > 0:
+        direction = "increased"
+    else:
+        direction = "decreased"
+    return {
+        "metric": metric,
+        "label": label,
+        "unit": unit,
+        "start_value": start_value,
+        "end_value": end_value,
+        "change": round(change, 4),
+        "change_unit": "percentage points" if unit == "percent" else unit,
+        "direction": direction,
+        "distinct_value_count": distinct_value_count,
+    }
 
 
 class MarketDataTools:
@@ -199,6 +274,205 @@ class MarketDataTools:
         return {
             "period_one": self._period_summary(first_start, first_end),
             "period_two": self._period_summary(second_start, second_end),
+        }
+
+    def analyse_market_volatility_relationship(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> dict[str, Any]:
+        start, end = _date_range(start_date, end_date)
+        query = text(
+            """
+            SELECT
+                trading_date,
+                close_value,
+                return_20d_percent,
+                realized_volatility_14d_percent
+            FROM curated.market_intelligence_daily
+            WHERE trading_date BETWEEN :start_date AND :end_date
+            ORDER BY trading_date
+            """
+        )
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                query,
+                {"start_date": start, "end_date": end},
+            ).all()
+        if len(rows) < 2:
+            raise ValueError(
+                "At least two market observations are required for relationship analysis"
+            )
+
+        start_close = float(rows[0].close_value)
+        end_close = float(rows[-1].close_value)
+        change_points = end_close - start_close
+        if abs(change_points) < 1e-12:
+            market_direction = "unchanged"
+        elif change_points > 0:
+            market_direction = "rose"
+        else:
+            market_direction = "fell"
+
+        close_volatility_pairs: list[tuple[float, float]] = []
+        return_20d_volatility_pairs: list[tuple[float, float]] = []
+        daily_return_volatility_pairs: list[tuple[float, float]] = []
+        previous_close: float | None = None
+        for row in rows:
+            close = float(row.close_value)
+            volatility = (
+                float(row.realized_volatility_14d_percent)
+                if row.realized_volatility_14d_percent is not None
+                else None
+            )
+            if volatility is not None:
+                close_volatility_pairs.append((close, volatility))
+                if row.return_20d_percent is not None:
+                    return_20d_volatility_pairs.append(
+                        (float(row.return_20d_percent), volatility)
+                    )
+                if previous_close is not None:
+                    daily_return_volatility_pairs.append(
+                        (log(close / previous_close) * 100, volatility)
+                    )
+            previous_close = close
+
+        return {
+            "requested_start_date": start.isoformat(),
+            "requested_end_date": end.isoformat(),
+            "effective_start_date": rows[0].trading_date.isoformat(),
+            "effective_end_date": rows[-1].trading_date.isoformat(),
+            "observation_count": len(rows),
+            "start_close": start_close,
+            "end_close": end_close,
+            "change_points": round(change_points, 4),
+            "change_percent": round((end_close / start_close - 1) * 100, 4),
+            "market_direction": market_direction,
+            "correlations": {
+                "close_level_vs_volatility": _correlation_summary(
+                    close_volatility_pairs,
+                    definition=(
+                        "Pearson correlation between the daily ASX 200 closing "
+                        "level and 14-day annualised realised volatility."
+                    ),
+                ),
+                "return_20d_vs_volatility": _correlation_summary(
+                    return_20d_volatility_pairs,
+                    definition=(
+                        "Pearson correlation between the ASX 200 20-trading-day "
+                        "return and 14-day annualised realised volatility."
+                    ),
+                ),
+                "daily_return_vs_volatility": _correlation_summary(
+                    daily_return_volatility_pairs,
+                    definition=(
+                        "Pearson correlation between the daily ASX 200 log return "
+                        "and 14-day annualised realised volatility."
+                    ),
+                ),
+            },
+            "correlation_interpretation_note": (
+                "Strength labels use absolute Pearson correlation thresholds: "
+                "below 0.1 negligible, below 0.3 weak, below 0.5 moderate, "
+                "below 0.7 strong, otherwise very strong; correlation does not "
+                "establish causation."
+            ),
+        }
+
+    def analyse_metric_correlation(
+        self,
+        metric_one: str,
+        metric_two: str,
+        start_date: str,
+        end_date: str,
+    ) -> dict[str, Any]:
+        if metric_one == metric_two:
+            raise ValueError("metric_one and metric_two must be different")
+        column_one, label_one, unit_one = _metric(metric_one)
+        column_two, label_two, unit_two = _metric(metric_two)
+        start, end = _date_range(start_date, end_date)
+        query = text(
+            f"""
+            SELECT
+                trading_date,
+                {column_one} AS metric_one_value,
+                {column_two} AS metric_two_value
+            FROM curated.market_intelligence_daily
+            WHERE trading_date BETWEEN :start_date AND :end_date
+                AND {column_one} IS NOT NULL
+                AND {column_two} IS NOT NULL
+            ORDER BY trading_date
+            """
+        )
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                query,
+                {"start_date": start, "end_date": end},
+            ).all()
+        if len(rows) < 2:
+            raise ValueError(
+                "At least two paired observations are required for correlation analysis"
+            )
+
+        pairs = [
+            (float(row.metric_one_value), float(row.metric_two_value)) for row in rows
+        ]
+        notes = [
+            (
+                "The coefficient uses complete paired observations aligned on ASX 200 "
+                "trading dates and is descriptive; correlation does not establish causation."
+            )
+        ]
+        if "rba_cash_rate_percent" in {metric_one, metric_two}:
+            notes.append(
+                "The RBA cash rate is an as-of, forward-filled step series, so unchanged "
+                "rate regimes contribute repeated daily values and this is not an "
+                "RBA-decision event study."
+            )
+        if {metric_one, metric_two} & {"asx_200_close", "rolling_average_20d"}:
+            notes.append(
+                "Correlation involving index levels or rolling-average levels can reflect "
+                "common trends rather than correlation between changes."
+            )
+        if {metric_one, metric_two} & {
+            "return_20d_percent",
+            "realized_volatility_14d_percent",
+        }:
+            notes.append(
+                "Overlapping 20-day returns or 14-day volatility windows create serially "
+                "related observations, so the coefficient is a descriptive summary."
+            )
+
+        return {
+            "requested_start_date": start.isoformat(),
+            "requested_end_date": end.isoformat(),
+            "effective_start_date": rows[0].trading_date.isoformat(),
+            "effective_end_date": rows[-1].trading_date.isoformat(),
+            "paired_observation_count": len(rows),
+            "metric_one": _metric_change_summary(
+                metric=metric_one,
+                label=label_one,
+                unit=unit_one,
+                start_value=pairs[0][0],
+                end_value=pairs[-1][0],
+                distinct_value_count=len({pair[0] for pair in pairs}),
+            ),
+            "metric_two": _metric_change_summary(
+                metric=metric_two,
+                label=label_two,
+                unit=unit_two,
+                start_value=pairs[0][1],
+                end_value=pairs[-1][1],
+                distinct_value_count=len({pair[1] for pair in pairs}),
+            ),
+            "correlation": _correlation_summary(
+                pairs,
+                definition=(
+                    f"Pearson correlation between daily aligned {label_one} and "
+                    f"{label_two}."
+                ),
+            ),
+            "methodology_notes": notes,
         }
 
     def get_extreme_observations(

@@ -40,7 +40,7 @@ def test_dashboard_renders_without_runtime_exceptions(
         ),
     )
     monkeypatch.setenv("FOUNDRY_AGENT_NAME", "test-agent")
-    monkeypatch.setenv("FOUNDRY_AGENT_VERSION", "3")
+    monkeypatch.setenv("FOUNDRY_AGENT_VERSION", "4")
     monkeypatch.setenv("AZURE_TENANT_ID", "test-tenant")
     monkeypatch.setenv("AZURE_CLIENT_ID", "test-client")
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "test-secret")

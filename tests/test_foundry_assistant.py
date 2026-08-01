@@ -8,7 +8,11 @@ from typing import Any
 
 import pytest
 
-from market_intelligence.assistant.foundry import FoundryAssistant, FoundrySettings
+from market_intelligence.assistant.foundry import (
+    TOOL_SCHEMAS,
+    FoundryAssistant,
+    FoundrySettings,
+)
 
 
 @dataclass
@@ -80,6 +84,13 @@ def test_agent_endpoint_is_converted_to_openai_base_url() -> None:
     )
 
     assert settings.base_url.endswith("/agents/agent/endpoint/protocols/openai")
+
+
+def test_relationship_tool_is_persisted_in_agent_schema() -> None:
+    tool_names = {tool["name"] for tool in TOOL_SCHEMAS}
+
+    assert "analyse_market_volatility_relationship" in tool_names
+    assert "analyse_metric_correlation" in tool_names
 
 
 def test_answer_executes_function_call_and_returns_final_text() -> None:

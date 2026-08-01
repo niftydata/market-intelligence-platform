@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from itertools import combinations
 
 import pytest
 
-from market_intelligence.assistant.tools import MarketDataTools
+from market_intelligence.assistant.tools import METRICS, MarketDataTools
 from market_intelligence.database import create_database_engine
 
 INTEGRATION_DATABASE_URL = os.getenv("INTEGRATION_DATABASE_URL")
@@ -59,3 +60,70 @@ def test_compare_periods_and_freshness(tools: MarketDataTools) -> None:
     assert comparison["period_one"]["observation_count"] > 0
     assert comparison["period_two"]["observation_count"] > 0
     assert freshness["latest_pipeline_status"] == "succeeded"
+
+
+def test_market_volatility_relationship_is_deterministic(
+    tools: MarketDataTools,
+) -> None:
+    relationship = tools.analyse_market_volatility_relationship(
+        "2025-03-14",
+        "2026-03-13",
+    )
+
+    assert relationship["effective_start_date"] == "2025-03-14"
+    assert relationship["effective_end_date"] == "2026-03-13"
+    assert relationship["start_close"] == pytest.approx(7_789.7, abs=0.1)
+    assert relationship["end_close"] == pytest.approx(8_617.1, abs=0.1)
+    assert relationship["market_direction"] == "rose"
+    assert relationship["change_points"] == pytest.approx(827.4, abs=0.1)
+    assert relationship["change_percent"] == pytest.approx(10.6217, abs=0.001)
+    correlations = relationship["correlations"]
+    assert correlations["close_level_vs_volatility"]["coefficient"] == pytest.approx(
+        -0.4625,
+        abs=0.001,
+    )
+    assert correlations["return_20d_vs_volatility"]["coefficient"] == pytest.approx(
+        -0.3178,
+        abs=0.001,
+    )
+    assert correlations["daily_return_vs_volatility"]["coefficient"] == pytest.approx(
+        0.1095,
+        abs=0.001,
+    )
+
+
+def test_rba_cash_rate_and_return_correlation_is_deterministic(
+    tools: MarketDataTools,
+) -> None:
+    analysis = tools.analyse_metric_correlation(
+        "rba_cash_rate_percent",
+        "return_20d_percent",
+        "2025-03-14",
+        "2026-03-13",
+    )
+
+    assert analysis["effective_start_date"] == "2025-03-14"
+    assert analysis["effective_end_date"] == "2026-03-13"
+    assert analysis["paired_observation_count"] == 253
+    assert analysis["metric_one"]["direction"] == "decreased"
+    assert analysis["metric_one"]["change"] == pytest.approx(-0.24)
+    assert analysis["metric_one"]["distinct_value_count"] == 5
+    assert analysis["correlation"]["coefficient"] == pytest.approx(0.0466)
+    assert analysis["correlation"]["direction"] == "positive"
+    assert analysis["correlation"]["strength"] == "negligible"
+    assert any("forward-filled step series" in note for note in analysis["methodology_notes"])
+
+
+def test_every_allowlisted_metric_pair_can_be_analysed(
+    tools: MarketDataTools,
+) -> None:
+    for metric_one, metric_two in combinations(METRICS, 2):
+        analysis = tools.analyse_metric_correlation(
+            metric_one,
+            metric_two,
+            "2025-03-14",
+            "2026-03-13",
+        )
+
+        assert analysis["paired_observation_count"] > 0
+        assert analysis["correlation"]["coefficient"] is not None
