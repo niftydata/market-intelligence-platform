@@ -6,10 +6,11 @@ import statistics
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 import market_intelligence.database as database
 from market_intelligence.dashboard.data import load_dashboard_frame
+from market_intelligence.database import create_database_engine
 
 INTEGRATION_DATABASE_URL = os.getenv("INTEGRATION_DATABASE_URL")
 
@@ -20,7 +21,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_latest_curated_metrics_match_independent_calculation() -> None:
-    engine = create_engine(INTEGRATION_DATABASE_URL, pool_pre_ping=True)
+    engine = create_database_engine(INTEGRATION_DATABASE_URL)
     try:
         with engine.connect() as connection:
             closes_descending = [
@@ -82,7 +83,7 @@ def test_latest_curated_metrics_match_independent_calculation() -> None:
 
 
 def test_dashboard_window_ends_on_or_before_selected_date() -> None:
-    engine = create_engine(INTEGRATION_DATABASE_URL, pool_pre_ping=True)
+    engine = create_database_engine(INTEGRATION_DATABASE_URL)
     try:
         frame = load_dashboard_frame(
             engine,
@@ -102,7 +103,7 @@ def test_failed_curated_validation_rolls_back_replacement(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    engine = create_engine(INTEGRATION_DATABASE_URL, pool_pre_ping=True)
+    engine = create_database_engine(INTEGRATION_DATABASE_URL)
     try:
         with engine.connect() as connection:
             before = connection.execute(

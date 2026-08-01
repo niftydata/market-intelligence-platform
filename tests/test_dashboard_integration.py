@@ -6,12 +6,32 @@ from pathlib import Path
 
 import pytest
 
+from market_intelligence.dashboard.data import load_market_events
+from market_intelligence.database import create_database_engine
+
 INTEGRATION_DATABASE_URL = os.getenv("INTEGRATION_DATABASE_URL")
 
 pytestmark = pytest.mark.skipif(
     not INTEGRATION_DATABASE_URL,
     reason="INTEGRATION_DATABASE_URL is not configured",
 )
+
+
+def test_external_events_align_to_asx_sessions() -> None:
+    engine = create_database_engine(INTEGRATION_DATABASE_URL)
+    try:
+        events = load_market_events(
+            engine,
+            window_start_date=date(2023, 3, 1),
+            window_end_date=date(2023, 3, 31),
+        )
+    finally:
+        engine.dispose()
+
+    svb = events.loc[events["short_label"] == "US regional banking stress"].iloc[0]
+    assert svb["event_date"].date() == date(2023, 3, 10)
+    assert svb["plot_date"].date() == date(2023, 3, 13)
+    assert svb["alignment_method"] == "Timestamp aligned to first ASX close after event"
 
 
 def test_dashboard_renders_without_runtime_exceptions(

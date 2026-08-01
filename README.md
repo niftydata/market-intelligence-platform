@@ -24,6 +24,7 @@ The first migration creates:
 - `raw.market_index_daily` for source-aligned daily index records;
 - `raw.rba_cash_rate_daily` for the RBA F1 `FIRMMCRID` series;
 - `curated.market_intelligence_daily` for the aligned analytical dataset;
+- `reference.market_event` for approved, source-cited contextual annotations;
 - `control.pipeline_run` for run status and record counts;
 - `control.data_quality_result` for explicit validation outcomes;
 - `control.rejected_record` for records that must not be silently discarded.
@@ -154,6 +155,21 @@ The dashboard includes an analysis end-date selector. It resolves weekends and
 market holidays to the most recent available trading date and displays the
 trailing 90 calendar days. Historical RAG thresholds use only observations
 available on or before the selected date, avoiding look-ahead bias.
+
+The volatility chart overlays at most five major context markers in its visible
+window. Material RBA cash-rate movements of at least 0.10 percentage points and
+entries into the red volatility state are derived deterministically. External
+events are displayed only when approved in `reference.market_event`, retain
+their source, and are mapped to the next
+available ASX trading date when they occur on a non-trading day. These markers
+provide context and do not assert causation.
+
+External-event alignment is timezone and trading-calendar aware. Where a precise
+UTC timestamp is available, the event is mapped to the first curated ASX session
+whose 4:00 pm Australia/Sydney close follows it. A governed effective-market-date
+override is retained for historical events where the source does not provide a
+defensible timestamp. Tooltips show the occurrence time, plotted ASX session,
+alignment method, country, scope, transmission channel and source.
 
 AI-assisted development decisions and corrections are recorded in
 [`docs/ai-agent-log.md`](docs/ai-agent-log.md).

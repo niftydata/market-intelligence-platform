@@ -24,6 +24,7 @@ from market_intelligence.dashboard.data import (
     DashboardMetadata,
     load_dashboard_frame,
     load_dashboard_metadata,
+    load_market_events,
 )
 from market_intelligence.database import (
     RefreshAlreadyRunningError,
@@ -70,6 +71,15 @@ def dashboard_frame(analysis_end_date: date) -> pd.DataFrame:
         database_engine(),
         analysis_end_date=analysis_end_date,
         window_days=90,
+    )
+
+
+@st.cache_data(ttl=300)
+def market_events(window_start_date: date, window_end_date: date) -> pd.DataFrame:
+    return load_market_events(
+        database_engine(),
+        window_start_date=window_start_date,
+        window_end_date=window_end_date,
     )
 
 
@@ -174,7 +184,7 @@ def market_chart(frame: pd.DataFrame) -> go.Figure:
     return figure
 
 
-def volatility_chart(frame: pd.DataFrame) -> go.Figure:
+def volatility_chart(frame: pd.DataFrame, events: pd.DataFrame) -> go.Figure:
     latest = frame.iloc[-1]
     figure = go.Figure()
     figure.add_trace(
@@ -203,12 +213,108 @@ def volatility_chart(frame: pd.DataFrame) -> go.Figure:
         annotation_text="Red threshold",
         annotation_position="top left",
     )
+    if not events.empty:
+        event_points = events.merge(
+            frame[["trading_date", "realized_volatility_14d_percent"]],
+            left_on="plot_date",
+            right_on="trading_date",
+            how="inner",
+        )
+        for plot_date in event_points["plot_date"]:
+            figure.add_vline(
+                x=plot_date,
+                line_color=MUTED,
+                line_width=1.2,
+                line_dash="dot",
+                opacity=0.7,
+            )
+        if not event_points.empty:
+            event_points = event_points.copy()
+            event_points["event_timing_label"] = event_points.apply(
+                lambda row: (
+                    pd.Timestamp(row["event_timestamp_utc"])
+                    .tz_convert(SYDNEY_TIMEZONE)
+                    .strftime("%d/%m/%Y %H:%M %Z")
+                    if pd.notna(row["event_timestamp_utc"])
+                    else row["event_date"].strftime("%d/%m/%Y (time not recorded)")
+                ),
+                axis=1,
+            )
+            event_points["plot_date_label"] = event_points["plot_date"].dt.strftime(
+                "%d/%m/%Y"
+            )
+            event_points["context_label"] = event_points.apply(
+                lambda row: " · ".join(
+                    str(value)
+                    for value in (
+                        (
+                            row["country_code"]
+                            if pd.notna(row["country_code"])
+                            else "Global"
+                        ),
+                        row["event_scope"],
+                        row["transmission_channel"],
+                    )
+                    if pd.notna(value) and value
+                ),
+                axis=1,
+            )
+            event_points["source_label"] = event_points.apply(
+                lambda row: (
+                    f"{row['source_name']} ({row['source_url']})"
+                    if row["source_url"]
+                    else row["source_name"]
+                ),
+                axis=1,
+            )
+            figure.add_trace(
+                go.Scatter(
+                    x=event_points["plot_date"],
+                    y=event_points["realized_volatility_14d_percent"],
+                    name="Major context event",
+                    mode="markers+text",
+                    marker={
+                        "color": NAVY,
+                        "size": 9,
+                        "symbol": "diamond",
+                        "line": {"color": "white", "width": 1},
+                    },
+                    text=event_points["short_label"],
+                    textposition="top center",
+                    textfont={"size": 10, "color": NAVY},
+                    cliponaxis=False,
+                    customdata=event_points[
+                        [
+                            "short_label",
+                            "event_timing_label",
+                            "plot_date_label",
+                            "alignment_method",
+                            "description",
+                            "category",
+                            "context_label",
+                            "source_label",
+                        ]
+                    ],
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "Occurred %{customdata[1]}<br>"
+                        "ASX chart session: %{customdata[2]}<br>"
+                        "Alignment: %{customdata[3]}<br>"
+                        "%{customdata[4]}<br>"
+                        "Category: %{customdata[5]}<br>"
+                        "Context: %{customdata[6]}<br>"
+                        "Source: %{customdata[7]}<br>"
+                        "<i>Context only; timing does not establish causation.</i>"
+                        "<extra></extra>"
+                    ),
+                )
+            )
     figure.update_layout(
-        height=315,
-        margin={"l": 8, "r": 8, "t": 20, "b": 8},
+        height=340,
+        margin={"l": 8, "r": 8, "t": 45, "b": 8},
         paper_bgcolor="white",
         plot_bgcolor="white",
-        showlegend=False,
+        showlegend=not events.empty,
         hovermode="x unified",
         yaxis={
             "title": "Annualised volatility",
@@ -217,6 +323,13 @@ def volatility_chart(frame: pd.DataFrame) -> go.Figure:
             "rangemode": "tozero",
         },
         font={"family": "Noto Sans, Arial, sans-serif", "color": NAVY},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+        },
     )
     return figure
 
@@ -745,6 +858,11 @@ except Exception:
     )
     st.stop()
 
+events = market_events(
+    pd.Timestamp(data.iloc[0]["trading_date"]).date(),
+    pd.Timestamp(data.iloc[-1]["trading_date"]).date(),
+)
+
 latest = data.iloc[-1]
 effective_end_date = pd.Timestamp(latest["trading_date"]).date()
 signal_label, signal_title, signal_color = signal_content(str(latest["rag_status"]))
@@ -846,12 +964,14 @@ st.markdown('<div class="section-title">What to watch</div>', unsafe_allow_html=
 st.markdown(
     (
         '<div class="section-subtitle">Volatility is monitored against dynamically '
-        "calibrated five-year percentile thresholds.</div>"
+        "calibrated five-year percentile thresholds. Diamonds identify approved "
+        "external context or deterministic monitoring events; timing does not "
+        "establish causation.</div>"
     ),
     unsafe_allow_html=True,
 )
 st.plotly_chart(
-    volatility_chart(data),
+    volatility_chart(data, events),
     use_container_width=True,
     config={"displayModeBar": False, "responsive": True},
 )

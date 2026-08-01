@@ -80,6 +80,169 @@ def load_dashboard_frame(
     return frame
 
 
+def load_market_events(
+    engine: Engine,
+    *,
+    window_start_date: date,
+    window_end_date: date,
+    max_events: int = 5,
+) -> pd.DataFrame:
+    """Load governed and deterministic context markers for the visible chart."""
+    query = text(
+        """
+        WITH market_series AS (
+            SELECT
+                trading_date,
+                rba_observation_date,
+                rba_cash_rate_percent,
+                rag_status,
+                lag(rba_cash_rate_percent) OVER (
+                    ORDER BY trading_date
+                ) AS previous_cash_rate,
+                lag(rag_status) OVER (
+                    ORDER BY trading_date
+                ) AS previous_rag_status
+            FROM curated.market_intelligence_daily
+            WHERE trading_date <= :window_end_date
+        ),
+        external_events AS (
+            SELECT
+                event.event_date,
+                event.event_timestamp_utc,
+                effective_date.plot_date,
+                event.short_label,
+                event.description,
+                event.category,
+                event.country_code,
+                event.transmission_channel,
+                event.event_scope,
+                event.source_name,
+                event.source_url,
+                CASE
+                    WHEN event.effective_market_date IS NOT NULL
+                        THEN 'Governed market-date alignment'
+                    WHEN event.event_timestamp_utc IS NOT NULL
+                        THEN 'Timestamp aligned to first ASX close after event'
+                    ELSE 'Event date aligned to available ASX session'
+                END AS alignment_method,
+                event.display_priority
+            FROM reference.market_event AS event
+            CROSS JOIN LATERAL (
+                SELECT coalesce(
+                    event.effective_market_date,
+                    (
+                        SELECT min(trading_date)
+                        FROM curated.market_intelligence_daily
+                        WHERE (
+                            (trading_date::timestamp + TIME '16:00')
+                            AT TIME ZONE 'Australia/Sydney'
+                        ) >= coalesce(
+                            event.event_timestamp_utc,
+                            event.event_date::timestamp
+                                AT TIME ZONE 'Australia/Sydney'
+                        )
+                    )
+                ) AS plot_date
+            ) AS effective_date
+            WHERE event.is_approved
+                AND effective_date.plot_date >= :window_start_date
+                AND effective_date.plot_date <= :window_end_date
+        ),
+        cash_rate_changes AS (
+            SELECT DISTINCT ON (rba_observation_date)
+                rba_observation_date AS event_date,
+                NULL::timestamptz AS event_timestamp_utc,
+                trading_date AS plot_date,
+                'RBA cash rate change'::text AS short_label,
+                (
+                    'The RBA cash rate changed from '
+                    || trim(to_char(previous_cash_rate, 'FM990.00'))
+                    || '% to '
+                    || trim(to_char(rba_cash_rate_percent, 'FM990.00'))
+                    || '%.'
+                )::text AS description,
+                'monetary_policy'::text AS category,
+                'AU'::text AS country_code,
+                'domestic monetary policy'::text AS transmission_channel,
+                'domestic'::text AS event_scope,
+                'Reserve Bank of Australia'::text AS source_name,
+                'https://www.rba.gov.au/statistics/cash-rate/'::text AS source_url,
+                'Observed on curated ASX trading date'::text AS alignment_method,
+                80 AS display_priority
+            FROM market_series
+            WHERE trading_date >= :window_start_date
+                AND rba_observation_date IS NOT NULL
+                AND previous_cash_rate IS NOT NULL
+                AND rba_cash_rate_percent IS DISTINCT FROM previous_cash_rate
+                AND abs(rba_cash_rate_percent - previous_cash_rate) >= 0.10
+            ORDER BY rba_observation_date, trading_date
+        ),
+        red_signal_entries AS (
+            SELECT
+                trading_date AS event_date,
+                NULL::timestamptz AS event_timestamp_utc,
+                trading_date AS plot_date,
+                'Red volatility signal'::text AS short_label,
+                'The 14-day realised-volatility measure entered the red monitoring state.'::text
+                    AS description,
+                'market_shock'::text AS category,
+                NULL::text AS country_code,
+                'calculated market volatility'::text AS transmission_channel,
+                'domestic'::text AS event_scope,
+                'NiftyData calculated metric'::text AS source_name,
+                ''::text AS source_url,
+                'Calculated on curated ASX trading date'::text AS alignment_method,
+                60 AS display_priority
+            FROM market_series
+            WHERE trading_date >= :window_start_date
+                AND rag_status = 'red'
+                AND previous_rag_status IS DISTINCT FROM 'red'
+            ORDER BY trading_date
+            LIMIT 1
+        ),
+        ranked_events AS (
+            SELECT * FROM external_events
+            UNION ALL
+            SELECT * FROM cash_rate_changes
+            UNION ALL
+            SELECT * FROM red_signal_entries
+        ),
+        limited_events AS (
+            SELECT *
+            FROM ranked_events
+            ORDER BY display_priority DESC, event_date DESC
+            LIMIT :max_events
+        )
+        SELECT
+            event_date,
+            event_timestamp_utc,
+            plot_date,
+            short_label,
+            description,
+            category,
+            country_code,
+            transmission_channel,
+            event_scope,
+            source_name,
+            source_url,
+            alignment_method,
+            display_priority
+        FROM limited_events
+        ORDER BY plot_date, display_priority DESC
+        """
+    )
+    return pd.read_sql_query(
+        query,
+        engine,
+        params={
+            "window_start_date": window_start_date,
+            "window_end_date": window_end_date,
+            "max_events": max_events,
+        },
+        parse_dates=["event_date", "event_timestamp_utc", "plot_date"],
+    )
+
+
 def load_dashboard_metadata(engine: Engine) -> DashboardMetadata:
     query = text(
         """
