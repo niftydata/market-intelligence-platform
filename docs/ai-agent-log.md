@@ -75,3 +75,73 @@ Human guardrails:
 Verification: the dashboard is executed against PostgreSQL with Streamlit's
 testing framework, and the deployed process exposes a successful health
 endpoint before release.
+
+## Grounded AI assistant and numerical correction
+
+The Microsoft Foundry prompt agent initially produced a directionally incorrect
+statement: it described an ASX 200 move from 7,789.7 to 8,617.1 as a fall. The
+human reviewer rejected that output rather than treating fluent text as valid
+analysis.
+
+Correction: deterministic tools were added for snapshots, period comparisons,
+volatility relationships and cross-measure correlations. The tools calculate
+dates, direction, absolute change, percentage change, sample size and caveats
+from curated data. Agent instructions require these tools for quantitative
+claims and prohibit treating correlation or event timing as causation.
+
+Accepted contribution: conversational explanation and synthesis over governed
+tool results.
+
+Human override: ungrounded arithmetic and directional interpretation were not
+accepted. The corrected agent definition was versioned and tested before use.
+
+## Hosted-source constraint discovered through testing
+
+The coding agent helped add an authenticated end-to-end refresh with stage-level
+counts and concise failure reporting. Live testing then showed that the RBA
+source returned HTTP 403 when called from the Singapore-hosted Render service.
+
+Human decision: retain Singapore hosting for the dashboard and database, but run
+scheduled RBA ingestion from an Australian always-on PC using the external
+Render PostgreSQL connection. The web refresh remains isolated and a failed
+source stage cannot replace the last validated curated dataset.
+
+This was accepted as an operational constraint and documented as a design
+trade-off rather than hidden with scraping workarounds or disabled validation.
+
+## Context events and timezone review
+
+The agent proposed source-cited market-context annotations and used authoritative
+web sources to verify neutral event names and dates. The human accepted a sparse,
+governed catalogue but required China-specific events because of Australia's
+commodity and regional-market exposure.
+
+The first implementation used calendar dates. Review identified that this was
+insufficient for US announcements after the ASX close and for weekend events.
+The design was corrected to store UTC timestamps where defensible, convert them
+through `Australia/Sydney`, and map them to the first eligible ASX close. A
+reviewed effective-market-date override is used when sources do not provide a
+defensible timestamp. Tooltips disclose both the event time and plotted session.
+
+Live database validation also showed that treating every change in the observed
+RBA overnight cash-rate series as an event created noise. The rule was corrected
+to annotate only movements of at least 0.10 percentage points.
+
+Accepted contribution: candidate research, schema implementation, chart
+annotation and automated tests.
+
+Human guardrails: sources must be retained, no causal claim is inferred, display
+count is capped, applied migrations are immutable, and ambiguous timing is made
+explicit rather than assigned false precision.
+
+## Verification and use boundaries
+
+The coding agent was used to inspect the repository, edit Python/SQL/Markdown,
+run linting and tests, validate migrations against PostgreSQL, and investigate
+documented external APIs. Generated changes were reviewed against live data and
+revised when tests exposed incorrect assumptions.
+
+AI was not given authority to make investment recommendations, bypass source
+controls, weaken quality rules, publish secrets, or grant itself production
+access. Runtime AI is authenticated, tool-scoped and non-critical: if Foundry is
+unavailable, the validated dashboard remains operational.
